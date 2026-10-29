@@ -13,9 +13,9 @@ export function ModelViewTabs({ view, onViewChange }) {
   </div>;
 }
 
-export default function ModelControls({ showLabels, onToggleLabels, onReset }) {
+export default function ModelControls({ showGrid, onToggleGrid, onReset }) {
   return <div className="toolbar-right">
-    <button className={showLabels ? "tool-button selected" : "tool-button"} onClick={onToggleLabels}><SlidersHorizontal size={15} /><span>Display</span></button>
+    <button className={showGrid ? "tool-button selected" : "tool-button"} onClick={onToggleGrid}><SlidersHorizontal size={15} /><span>Grid</span></button>
     <button className="tool-button" onClick={onReset} title="Reset camera"><RotateCcw size={15} /><span>Reset view</span></button>
   </div>;
 }
