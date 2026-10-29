@@ -3,7 +3,7 @@ import * as THREE from "three";
 import { createBuildingModel } from "../three/BuildingModel.js";
 import { isElementVisible } from "../three/ModelViews.js";
 
-export default function Viewport({ view }) {
+export default function Viewport({ view, showGrid = true }) {
   const hostRef = useRef(null);
   const viewRef = useRef(view);
   useEffect(() => { viewRef.current = view; }, [view]);
@@ -81,7 +81,7 @@ export default function Viewport({ view }) {
     const render = () => {
       frame = requestAnimationFrame(render);
       elements.forEach(element => { element.visible = isElementVisible(element.userData.category, viewRef.current); });
-      grid.visible = viewRef.current !== "foundation";
+      grid.visible = showGrid && viewRef.current !== "foundation";
       renderer.render(scene, camera);
     };
     render();
