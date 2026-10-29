@@ -6,7 +6,9 @@ import { isElementVisible } from "../three/ModelViews.js";
 export default function Viewport({ view, showGrid = true }) {
   const hostRef = useRef(null);
   const viewRef = useRef(view);
+  const showGridRef = useRef(showGrid);
   useEffect(() => { viewRef.current = view; }, [view]);
+  useEffect(() => { showGridRef.current = showGrid; }, [showGrid]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -81,7 +83,7 @@ export default function Viewport({ view, showGrid = true }) {
     const render = () => {
       frame = requestAnimationFrame(render);
       elements.forEach(element => { element.visible = isElementVisible(element.userData.category, viewRef.current); });
-      grid.visible = showGrid && viewRef.current !== "foundation";
+      grid.visible = showGridRef.current && viewRef.current !== "foundation";
       renderer.render(scene, camera);
     };
     render();
