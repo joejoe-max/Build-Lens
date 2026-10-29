@@ -2,6 +2,34 @@
 
 An early engineering workspace prototype for exploring building concepts in a navigable 3D viewport, organizing project documents, and discussing engineering information with Meta Model API.
 
+## Project structure
+
+```text
+Build-Lens/
+├── api/
+│   └── ai.js
+├── src/
+│   ├── components/
+│   │   ├── Viewport.jsx
+│   │   ├── ModelControls.jsx
+│   │   ├── EngineeringPanel.jsx
+│   │   └── AssumptionPanel.jsx
+│   ├── services/
+│   │   └── ai.js
+│   ├── three/
+│   │   ├── BuildingModel.js
+│   │   └── ModelViews.js
+│   ├── App.jsx
+│   ├── main.jsx
+│   └── styles.css
+├── .env.example
+├── .gitignore
+├── index.html
+├── package.json
+├── vercel.json
+└── README.md
+```
+
 ## Current prototype
 
 - React + Vite, plain JavaScript.
