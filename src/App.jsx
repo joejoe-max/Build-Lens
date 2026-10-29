@@ -21,7 +21,7 @@ export default function App() {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [mobilePanel, setMobilePanel] = useState(false);
-  const [showLabels, setShowLabels] = useState(true);
+  const [showGrid, setShowGrid] = useState(true);
   const [projectName, setProjectName] = useState("Untitled project");
   const [editingName, setEditingName] = useState(false);
   const [notice, setNotice] = useState("");
@@ -134,13 +134,13 @@ export default function App() {
           <ModelControls
             view={view}
             onViewChange={setView}
-            showLabels={showLabels}
-            onToggleLabels={() => setShowLabels(value => !value)}
+            showGrid={showGrid}
+            onToggleGrid={() => setShowGrid(value => !value)}
             onReset={() => document.querySelector(".viewport-canvas")?.dispatchEvent(new CustomEvent("buildlens-reset"))}
           />
         </div>
         <div className="viewport-wrap">
-          <Viewport view={view} />
+          <Viewport view={view} showGrid={showGrid} />
           <div className="viewport-badge"><span className="live-dot" /> CONCEPT MODEL <span className="badge-divider">/</span> DEMO DATA</div>
           <div className="viewport-instructions"><span>DRAG TO ORBIT</span><i /><span>SCROLL OR PINCH TO ZOOM</span></div>
           <div className="orientation-cube" aria-label="View orientation"><span className="cube-top">Y</span><span className="cube-front">Z</span><span className="cube-side">X</span></div>
