@@ -6,7 +6,8 @@ export function createBuildingModel(scene) {
   scene.add(building);
   const materials = {
     concrete: new THREE.MeshStandardMaterial({ color: "#a9b0b5", roughness: 0.82, metalness: 0.04 }),
-    slab: new THREE.MeshStandardMaterial({ color: "#737d85", roughness: 0.9, transparent: true, opacity: 0.62 }),
+    // Opaque slabs prevent overlapping surfaces and colours showing through during rotation.
+    slab: new THREE.MeshStandardMaterial({ color: "#737d85", roughness: 0.9, metalness: 0, transparent: false, opacity: 1, depthWrite: true }),
     beam: new THREE.MeshStandardMaterial({ color: "#d2d7db", roughness: 0.7 }),
     rebar: new THREE.MeshStandardMaterial({ color: "#c18b58", metalness: 0.62, roughness: 0.38 }),
     ground: new THREE.MeshStandardMaterial({ color: "#282d31", roughness: 1 }),
@@ -31,11 +32,17 @@ export function createBuildingModel(scene) {
   floors.forEach((y, floorIndex) => {
     addBox(`Floor slab ${floorIndex + 1}`, [6.7, 0.16, 5.7], [0, y, 0], materials.slab, "slab");
     if (floorIndex < floors.length - 1) {
+      // Fit each column segment between slab faces rather than through the slabs.
+      const floorSpacing = floors[floorIndex + 1] - y;
+      const columnHeight = floorSpacing - 0.16;
+      const columnCenterY = y + floorSpacing / 2;
       xs.forEach((x, xi) => zs.forEach((z, zi) => {
-        addBox(`Column ${floorIndex + 1}-${xi + 1}${zi + 1}`, [0.24, 3, 0.24], [x, y + 1.58, z], materials.concrete, "column");
+        addBox(`Column ${floorIndex + 1}-${xi + 1}${zi + 1}`, [0.24, columnHeight, 0.24], [x, columnCenterY, z], materials.concrete, "column");
       }));
-      zs.forEach((z, i) => addBox(`Beam X-${floorIndex + 1}-${i + 1}`, [6, 0.22, 0.22], [0, y + 2.96, z], materials.beam, "beam"));
-      xs.forEach((x, i) => addBox(`Beam Z-${floorIndex + 1}-${i + 1}`, [0.22, 0.22, 5], [x, y + 2.96, 0], materials.beam, "beam"));
+      // Beam tops meet the underside of the next slab; opaque surfaces avoid colour bleed.
+      const beamCenterY = floors[floorIndex + 1] - 0.08 - 0.11;
+      zs.forEach((z, i) => addBox(`Beam X-${floorIndex + 1}-${i + 1}`, [6, 0.22, 0.22], [0, beamCenterY, z], materials.beam, "beam"));
+      xs.forEach((x, i) => addBox(`Beam Z-${floorIndex + 1}-${i + 1}`, [0.22, 0.22, 5], [x, beamCenterY, 0], materials.beam, "beam"));
     }
   });
   xs.forEach((x, xi) => zs.forEach((z, zi) => {
