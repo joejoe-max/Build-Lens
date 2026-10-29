@@ -140,6 +140,8 @@ export default function BuildingViewport({ view, showLabels = true }) {
 
     const resetCamera = () => { azimuth = Math.PI / 4; elevation = 0.55; distance = 15; target.set(0, 3, 0); updateCamera(); };
     host.__resetBuildLensCamera = resetCamera;
+    const onResetEvent = () => resetCamera();
+    host.addEventListener("buildlens-reset", onResetEvent);
 
     const resize = () => {
       const width = Math.max(1, host.clientWidth), height = Math.max(1, host.clientHeight);
@@ -179,6 +181,8 @@ export default function BuildingViewport({ view, showLabels = true }) {
       renderer.domElement.removeEventListener("wheel", onWheel);
       renderer.domElement.removeEventListener("touchstart", onTouchStart);
       renderer.domElement.removeEventListener("touchmove", onTouchMove);
+      host.removeEventListener("buildlens-reset", onResetEvent);
+      delete host.__resetBuildLensCamera;
       scene.traverse(obj => {
         if (obj.geometry) obj.geometry.dispose();
         if (obj.material) (Array.isArray(obj.material) ? obj.material : [obj.material]).forEach(m => m.dispose());
