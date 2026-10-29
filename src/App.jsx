@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { Box, Building2, ChevronDown, FileUp, Layers3, MessageSquare, X } from "lucide-react";
+import { ChevronDown, FileUp, Layers3, MessageSquare, X } from "lucide-react";
 import Viewport from "./components/Viewport.jsx";
-import ModelControls from "./components/ModelControls.jsx";
+import ModelControls, { ModelViewTabs } from "./components/ModelControls.jsx";
 import EngineeringPanel from "./components/EngineeringPanel.jsx";
 import AssumptionPanel from "./components/AssumptionPanel.jsx";
 import { askBuildLens } from "./services/ai.js";
