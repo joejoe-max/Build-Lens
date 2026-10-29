@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { ChevronDown, FileUp, Layers3, MessageSquare, X } from "lucide-react";
 import Viewport from "./components/Viewport.jsx";
 import ModelControls, { ModelViewTabs } from "./components/ModelControls.jsx";
@@ -132,8 +132,6 @@ export default function App() {
         <div className="model-toolbar">
           <div className="toolbar-left"><span className="section-kicker">3D VIEWPORT</span><span className="toolbar-divider" /><span className="model-caption">Illustrative sample · not to scale</span></div>
           <ModelControls
-            view={view}
-            onViewChange={setView}
             showGrid={showGrid}
             onToggleGrid={() => setShowGrid(value => !value)}
             onReset={() => document.querySelector(".viewport-canvas")?.dispatchEvent(new CustomEvent("buildlens-reset"))}
@@ -145,6 +143,7 @@ export default function App() {
           <div className="viewport-instructions"><span>DRAG TO ORBIT</span><i /><span>SCROLL OR PINCH TO ZOOM</span></div>
           <div className="orientation-cube" aria-label="View orientation"><span className="cube-top">Y</span><span className="cube-front">Z</span><span className="cube-side">X</span></div>
         </div>
+        <ModelViewTabs view={view} onViewChange={setView} />
         <AssumptionPanel open={assumptionsOpen} onToggle={() => setAssumptionsOpen(value => !value)} />
       </section>
 
