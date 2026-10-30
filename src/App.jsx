@@ -1,22 +1,58 @@
-import React, { useEffect, useState } from "react";
-import { ChevronDown, FileUp, Layers3, MessageSquare, X } from "lucide-react";
+import React, { useEffect, useRef, useState } from "react";
+import { ChevronDown, FileUp, Layers3, MessageSquare, Plus, X } from "lucide-react";
+import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
+import mammoth from "mammoth";
 import Viewport from "./components/Viewport.jsx";
 import ModelControls, { ModelViewTabs } from "./components/ModelControls.jsx";
 import EngineeringPanel from "./components/EngineeringPanel.jsx";
 import AssumptionPanel from "./components/AssumptionPanel.jsx";
 import { askBuildLens } from "./services/ai.js";
 
-const initialFiles = [
-  { id: "sample-plan", name: "Sample-building-plan.pdf", kind: "DEMO", status: "Sample only" },
-  { id: "sample-struct", name: "Structural-layout.pdf", kind: "DEMO", status: "Sample only" }
-];
-const starterMessages = [
-  { role: "assistant", content: "BuildLens is ready. This workspace currently shows an illustrative sample building, not a model reconstructed from your drawings. Upload project documents to begin organizing the available information." }
-];
+pdfjsLib.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/legacy/build/pdf.worker.min.mjs", import.meta.url).toString();
+
+const starterMessages = [{ role: "assistant", content: "Welcome to BuildLens. Ask a question or attach a drawing, photo, PDF or document. I'll help interpret the information provided and separate confirmed details from assumptions. The 3D building is currently an illustrative sample, not a reconstruction of your files." }];
+const MAX_FILE_SIZE = 12 * 1024 * 1024;
+const textExtensions = ["txt", "md", "csv", "json", "xml"];
+
+async function readAttachment(file) {
+  const extension = file.name.split(".").pop().toLowerCase();
+  if (file.type.startsWith("image/") && ["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+    const dataUrl = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(new Error("Could not read image."));
+      reader.readAsDataURL(file);
+    });
+    return { id: crypto.randomUUID(), name: file.name, type: file.type, kind: "image", dataUrl, status: "Ready to analyse" };
+  }
+  if (extension === "pdf" || file.type === "application/pdf") {
+    const pdf = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
+    const pages = [];
+    for (let pageNumber = 1; pageNumber <= Math.min(pdf.numPages, 35); pageNumber++) {
+      const page = await pdf.getPage(pageNumber);
+      const content = await page.getTextContent();
+      const text = content.items.map(item => item.str).join(" ").trim();
+      if (text) pages.push(`[Page ${pageNumber}]\n${text}`);
+    }
+    const extracted = pages.join("\n\n");
+    if (!extracted) throw new Error(`${file.name} has no selectable text. Upload page screenshots/images for visual review.`);
+    return { id: crypto.randomUUID(), name: file.name, type: file.type, kind: "text", content: extracted.slice(0, 45000), status: "PDF text extracted" };
+  }
+  if (extension === "docx") {
+    const result = await mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() });
+    if (!result.value.trim()) throw new Error(`${file.name} contains no extractable text.`);
+    return { id: crypto.randomUUID(), name: file.name, type: file.type, kind: "text", content: result.value.slice(0, 45000), status: "Document text extracted" };
+  }
+  if (textExtensions.includes(extension) || file.type.startsWith("text/")) {
+    return { id: crypto.randomUUID(), name: file.name, type: file.type || "text/plain", kind: "text", content: (await file.text()).slice(0, 45000), status: "Text ready to analyse" };
+  }
+  throw new Error(`${file.name}: this format is not supported yet. Use PDF, DOCX, TXT, CSV, JSON, PNG, JPG or WEBP.`);
+}
 
 export default function App() {
   const [view, setView] = useState("building");
-  const [files, setFiles] = useState(initialFiles);
+  const [files, setFiles] = useState([]);
+  const [pendingAttachments, setPendingAttachments] = useState([]);
   const [messages, setMessages] = useState(starterMessages);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -26,10 +62,11 @@ export default function App() {
   const [editingName, setEditingName] = useState(false);
   const [notice, setNotice] = useState("");
   const [assumptionsOpen, setAssumptionsOpen] = useState(true);
+  const fileInputRef = useRef(null);
 
   useEffect(() => {
     try {
-      const saved = localStorage.getItem("buildlens-workspace-v1");
+      const saved = localStorage.getItem("buildlens-workspace-v2");
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed.messages) && parsed.messages.length) setMessages(parsed.messages);
@@ -41,77 +78,82 @@ export default function App() {
 
   useEffect(() => {
     try {
-      localStorage.setItem("buildlens-workspace-v1", JSON.stringify({ messages: messages.slice(-30), files, projectName }));
-    } catch {
-      setNotice("Local storage is full. Export or remove some workspace data.");
-    }
+      localStorage.setItem("buildlens-workspace-v2", JSON.stringify({ messages: messages.slice(-30), files, projectName }));
+    } catch { setNotice("Workspace storage is full. Remove some files or export the workspace."); }
   }, [messages, files, projectName]);
 
-  const addFiles = event => {
+  const addFiles = async event => {
     const selected = Array.from(event.target.files || []);
-    if (!selected.length) return;
-    const allowed = selected.filter(file => file.size <= 15 * 1024 * 1024);
-    const rejected = selected.length - allowed.length;
-    const added = allowed.map(file => ({
-      id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random()),
-      name: file.name,
-      kind: file.name.split(".").pop().toUpperCase(),
-      status: "Listed locally",
-      size: file.size
-    }));
-    setFiles(current => [...current.filter(file => !file.id.startsWith("sample-")), ...added]);
-    setNotice(rejected ? `${rejected} file(s) exceeded the 15 MB limit and were skipped.` : "File names added locally. Drawing extraction is not implemented yet.");
     event.target.value = "";
+    if (!selected.length) return;
+    const next = [];
+    const failures = [];
+    for (const file of selected) {
+      if (file.size > MAX_FILE_SIZE) { failures.push(`${file.name}: exceeds 12 MB`); continue; }
+      try {
+        const attachment = await readAttachment(file);
+        next.push(attachment);
+      } catch (error) { failures.push(error.message); }
+    }
+    if (next.length) {
+      setFiles(current => [...current, ...next.map(({ id, name, type, status }) => ({ id, name, kind: name.split(".").pop().toUpperCase(), type, status }))]);
+      setPendingAttachments(current => [...current, ...next]);
+      setNotice(`${next.length} file(s) ready. Add a question and send them to the assistant.`);
+    }
+    if (failures.length) setNotice(failures.slice(0, 3).join(" · "));
+    setMobilePanel(true);
+  };
+
+  const removeFile = id => {
+    setFiles(current => current.filter(file => file.id !== id));
+    setPendingAttachments(current => current.filter(file => file.id !== id));
+  };
+
+  const startNewChat = () => {
+    if (busy) return;
+    setMessages(starterMessages);
+    setInput("");
+    setPendingAttachments([]);
+    setNotice("Started a new chat. Your project files remain in the workspace.");
   };
 
   const sendMessage = async event => {
     event?.preventDefault();
     const message = input.trim();
-    if (!message || busy) return;
+    if ((!message && !pendingAttachments.length) || busy) return;
+    const attachmentSnapshot = pendingAttachments.slice(0, 8);
     const history = messages.slice(-8).map(({ role, content }) => ({ role, content }));
-    setMessages(current => [...current, { role: "user", content: message }]);
+    const userText = message || `Please inspect the ${attachmentSnapshot.length} attached file(s) and summarize what they contain.`;
+    const attachmentNames = attachmentSnapshot.map(file => file.name);
+    setMessages(current => [...current, { role: "user", content: attachmentNames.length ? `${userText}\n\nAttachments: ${attachmentNames.join(", ")}` : userText }]);
     setInput("");
+    setPendingAttachments(current => current.filter(file => !attachmentSnapshot.some(item => item.id === file.id)));
     setBusy(true);
     setMobilePanel(true);
     try {
-      const reply = await askBuildLens({ message, history });
+      const reply = await askBuildLens({ message: userText, history, attachments: attachmentSnapshot.map(({ name, type, kind, content, dataUrl }) => ({ name, type, kind, content, dataUrl })) });
       setMessages(current => [...current, { role: "assistant", content: reply }]);
     } catch (error) {
-      setMessages(current => [...current, {
-        role: "assistant",
-        content: `I couldn't reach the AI service: ${error.message}. Check that the app is deployed with MODEL_API_KEY configured, or try again later.`
-      }]);
-    } finally {
-      setBusy(false);
-    }
+      setMessages(current => [...current, { role: "assistant", content: `I couldn't complete that request: ${error.message}. Your uploaded files remain in the project list; you can try sending again.` }]);
+    } finally { setBusy(false); }
   };
 
   const exportWorkspace = () => {
     const blob = new Blob([JSON.stringify({ app: "BuildLens", exportedAt: new Date().toISOString(), projectName, files, messages }, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "buildlens-workspace.json";
-    a.click();
-    URL.revokeObjectURL(url);
+    const a = document.createElement("a"); a.href = url; a.download = "buildlens-workspace.json"; a.click(); URL.revokeObjectURL(url);
   };
 
   const clearWorkspace = () => {
     if (!window.confirm("Clear this workspace's chat and uploaded-file list? This cannot be undone.")) return;
-    setMessages(starterMessages);
-    setFiles([]);
-    setNotice("Workspace cleared.");
+    setMessages(starterMessages); setFiles([]); setPendingAttachments([]); setNotice("Workspace cleared.");
   };
 
   return <main className="app-shell">
     <header className="topbar">
-      <a className="brand" href="/" aria-label="BuildLens home">
-        <span className="brand-mark"><Layers3 size={19} strokeWidth={2.2} /></span><span>BuildLens</span><span className="brand-tag">WORKSPACE</span>
-      </a>
+      <a className="brand" href="/" aria-label="BuildLens home"><span className="brand-mark"><Layers3 size={19} strokeWidth={2.2} /></span><span>BuildLens</span><span className="brand-tag">WORKSPACE</span></a>
       <div className="project-title">
-        {editingName
-          ? <input autoFocus value={projectName} onChange={e => setProjectName(e.target.value)} onBlur={() => setEditingName(false)} onKeyDown={e => e.key === "Enter" && setEditingName(false)} aria-label="Project name" />
-          : <button className="project-name" onClick={() => setEditingName(true)} title="Rename project">{projectName}<ChevronDown size={14} /></button>}
+        {editingName ? <input autoFocus value={projectName} onChange={e => setProjectName(e.target.value)} onBlur={() => setEditingName(false)} onKeyDown={e => e.key === "Enter" && setEditingName(false)} aria-label="Project name" /> : <button className="project-name" onClick={() => setEditingName(true)} title="Rename project">{projectName}<ChevronDown size={14} /></button>}
         <span className="unsaved-dot" /><span className="saved-label">Local workspace</span>
       </div>
       <div className="top-actions">
@@ -120,22 +162,16 @@ export default function App() {
         <span className="prototype-pill">PROTOTYPE</span>
       </div>
     </header>
-
     <div className="workspace">
       <aside className="left-rail">
         <button className="rail-item active" title="Model workspace"><Layers3 size={18} /><span>Model</span></button>
-        <button className="rail-item" title="Project documents" onClick={() => document.getElementById("file-input")?.click()}><FileUp size={18} /><span>Files</span></button>
+        <button className="rail-item" title="Project documents" onClick={() => fileInputRef.current?.click()}><FileUp size={18} /><span>Files</span></button>
         <div className="rail-bottom"><span className="status-light" /><span>Workspace ready</span></div>
       </aside>
-
       <section className="model-column">
         <div className="model-toolbar">
           <div className="toolbar-left"><span className="section-kicker">3D VIEWPORT</span><span className="toolbar-divider" /><span className="model-caption">Illustrative sample · not to scale</span></div>
-          <ModelControls
-            showGrid={showGrid}
-            onToggleGrid={() => setShowGrid(value => !value)}
-            onReset={() => document.querySelector(".viewport-canvas")?.dispatchEvent(new CustomEvent("buildlens-reset"))}
-          />
+          <ModelControls showGrid={showGrid} onToggleGrid={() => setShowGrid(value => !value)} onReset={() => document.querySelector(".viewport-canvas")?.dispatchEvent(new CustomEvent("buildlens-reset"))} />
         </div>
         <div className="viewport-wrap">
           <Viewport view={view} showGrid={showGrid} />
@@ -146,22 +182,15 @@ export default function App() {
         <ModelViewTabs view={view} onViewChange={setView} />
         <AssumptionPanel open={assumptionsOpen} onToggle={() => setAssumptionsOpen(value => !value)} />
       </section>
-
       <EngineeringPanel
-        open={mobilePanel}
-        onClose={() => setMobilePanel(false)}
-        files={files}
-        onAddFiles={addFiles}
-        onRemoveFile={id => setFiles(current => current.filter(file => file.id !== id))}
-        messages={messages}
-        busy={busy}
-        input={input}
-        onInputChange={setInput}
-        onSend={sendMessage}
-        onClear={clearWorkspace}
-        onExport={exportWorkspace}
+        open={mobilePanel} onClose={() => setMobilePanel(false)}
+        files={files} onAddFiles={addFiles} onRemoveFile={removeFile}
+        messages={messages} busy={busy} input={input} onInputChange={setInput}
+        onSend={sendMessage} onClear={clearWorkspace} onExport={exportWorkspace}
+        onNewChat={startNewChat} fileInputRef={fileInputRef} pendingAttachments={pendingAttachments}
       />
     </div>
     {notice && <div className="toast" role="status">{notice}<button onClick={() => setNotice("")} aria-label="Dismiss notification"><X size={14} /></button></div>}
+    <input ref={fileInputRef} className="hidden-file-input" type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.webp,.docx,.txt,.md,.csv,.json,.xml,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/png,image/jpeg,image/webp,text/plain,text/csv" onChange={addFiles} />
   </main>;
 }
