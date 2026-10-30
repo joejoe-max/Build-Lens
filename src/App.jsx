@@ -178,7 +178,7 @@ export default function App() {
     <div className="workspace">
       <aside className="left-rail">
         <button className="rail-item active" title="Model workspace"><Layers3 size={18} /><span>Model</span></button>
-        <button className="rail-item" title="Project documents" onClick={() => fileInputRef.current?.click()}><FileUp size={18} /><span>Files</span></button>
+        <button className="rail-item" title="Project documents" onClick={() => { setHasStartedChat(true); setMobilePanel(true); }}><FileUp size={18} /><span>Files</span></button>
         <button className="rail-item" title="Ask BuildLens" onClick={() => { setHasStartedChat(true); setMobilePanel(true); }}><MessageSquare size={18} /><span>Ask AI</span></button>
         <div className="rail-bottom"><span className="status-light" /><span>Workspace ready</span></div>
       </aside>
