@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { analyzeStructuralConnectivity } from "../domain/buildingModel.js";
 
 const MATERIALS = {
   concrete: new THREE.MeshStandardMaterial({ color: "#a9b0b5", roughness: 0.82 }),
@@ -75,13 +76,25 @@ function createFromSpec(scene, model) {
     mesh.position.copy(vec(f.center,s));
     addMesh(group,elements,mesh,f.id,"foundations",f.label); addReinforcement(group,elements,f,s);
   }
-  for (const grid of model.grids || []) {
-    const extent=Math.max(10,...elements.map(e=>e.position.length()))*1.4, p=grid.position*s;
-    const points=grid.axis==="x" ? [new THREE.Vector3(p,0,-extent),new THREE.Vector3(p,0,extent)] : [new THREE.Vector3(-extent,0,p),new THREE.Vector3(extent,0,p)];
-    const line=new THREE.Line(new THREE.BufferGeometry().setFromPoints(points),new THREE.LineBasicMaterial({color:"#78838b"}));
-    addMesh(group,elements,line,grid.id,"grids",grid.label);
+  const bounds = new THREE.Box3().setFromObject(group);
+  const boundsSize = bounds.isEmpty() ? new THREE.Vector3(10, 5, 10) : bounds.getSize(new THREE.Vector3());
+  const boundsCenter = bounds.isEmpty() ? new THREE.Vector3() : bounds.getCenter(new THREE.Vector3());
+  const extentX = Math.max(boundsSize.x * 0.65, 5);
+  const extentZ = Math.max(boundsSize.z * 0.65, 5);
+  const gridY = Math.min(0, bounds.min.y - 0.02);
+  for (const gridLine of model.grids || []) {
+    const p = gridLine.position * s;
+    const points = gridLine.axis === "x"
+      ? [new THREE.Vector3(p, gridY, boundsCenter.z - extentZ), new THREE.Vector3(p, gridY, boundsCenter.z + extentZ)]
+      : [new THREE.Vector3(boundsCenter.x - extentX, gridY, p), new THREE.Vector3(boundsCenter.x + extentX, gridY, p)];
+    const line = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints(points),
+      new THREE.LineBasicMaterial({ color: "#78838b", transparent: true, opacity: 0.72 })
+    );
+    addMesh(group, elements, line, gridLine.id, "grids", gridLine.label);
   }
-  return { building: group, elements };
+  const connectivity = analyzeStructuralConnectivity(model);
+  return { building: group, elements, connectivity };
 }
 
 // Placeholder only: shown until a validated project-specific model is supplied.
