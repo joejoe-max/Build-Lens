@@ -18,6 +18,11 @@ INTERPRETATION RULES:
 - If source pages are missing, cropped, blurry or unreadable, say exactly which information could not be read.
 - Never invent engineering dimensions, reinforcement, loads, material strengths, design-code checks or calculation results.
 - Do not certify structural safety. Distinguish drawing interpretation from verified engineering design.
+- When presenting calculations, preserve every mathematical operator and unit. Never write adjacent numbers where a multiplication sign is intended. Use readable Markdown equations, for example: "1.35 × 5.75 + 1.5 × 2.00 = 10.7625 kN/m²". Use × for multiplication, / for division, parentheses for grouping, and Unicode superscripts (², ³) where useful.
+- Present each material calculation with: **Purpose**, **Source inputs**, **Formula**, **Substitution**, **Result**, **Status**, and **Limitations**. Keep units attached to values and show conversions.
+- Status labels must be precise: "Arithmetic checked" means only the arithmetic was independently recomputed; "Preliminary" means simplified assumptions were used; "Not checked" means no valid design check was completed; "Inconsistent" means source values conflict. Never label a structural member safe, adequate or code-compliant solely because an approximate hand calculation was performed.
+- Separate source-specified values from assumptions. State the assumed support condition, load path, tributary width, effective depth, material factors and design code whenever they materially affect a result. If any are unknown, identify the result as illustrative/preliminary.
+- For foundation recommendations, do not select a foundation type or size as "best" without geotechnical data, column actions, groundwater information, settlement assessment and applicable code checks. Give conditional options and list the missing evidence.
 MODEL AND TOOL BEHAVIOUR:
 Use render_building_model for a newly interpreted building. Use update_building_model when revising an existing model. Use set_model_visibility for display requests and inspect_model_element for element details. A successful model tool call updates project model data; the application handles Three.js rendering. Do not claim a viewport update unless confirmed.
 Keep the answer practical. Summarize extracted evidence, model contents, uncertainties and next required information.`;
@@ -201,6 +206,27 @@ const tools = [
   }
 ];
 
+// Meta's function schema validator rejects deeply nested parameter schemas.
+// Keep the provider-facing schema shallow for EVERY tool; the application
+// still validates each decoded payload before mutating project state.
+for (const tool of tools) {
+  const original = tool.function.parameters;
+  tool.function.description += "\\n\\nPass one argument named payload: a JSON-encoded string containing the complete arguments object. Payload shape: " + JSON.stringify(original);
+  tool.function.parameters = {
+    type: "object",
+    additionalProperties: false,
+    required: ["payload"],
+    properties: {
+      payload: {
+        type: "string",
+        minLength: 2,
+        maxLength: 900000,
+        description: "JSON-encoded string containing the function arguments described above."
+      }
+    }
+  };
+}
+
 function getText(value) {
   if (typeof value === "string") return value;
   if (Array.isArray(value)) return value.map(part => part?.text || "").join("");
@@ -220,6 +246,10 @@ function findElement(model, elementId) {
 }
 
 function executeTool(name, args, state) {
+  if (args && typeof args.payload === "string") {
+    try { args = JSON.parse(args.payload); }
+    catch { return { ok: false, error: "The tool payload was not valid JSON. Retry with a valid JSON-encoded payload string." }; }
+  }
   if (!args || typeof args !== "object" || Array.isArray(args)) {
     return { ok: false, error: "Tool arguments must be a JSON object." };
   }
