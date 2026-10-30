@@ -259,5 +259,5 @@ export default function Viewport({ view, showGrid = true, modelSpec = null, mode
       <div className="inspection-row inspection-slider-row"><span>Section position</span><input aria-label="Cutaway section position" type="range" min="0" max="100" value={Math.round(cutaway.position * 100)} onChange={event => setCutaway(current => ({ ...current, position: Number(event.target.value) / 100 }))} disabled={!cutaway.enabled}/></div>
       <div className="inspection-row selection-row"><span>{selectedElement ? "Selected: " + selectedElement.name + " · " + selectedElement.category : "Tap a structural element to inspect it"}</span><button type="button" className="inspection-button" disabled={!selectedElement} onClick={hideSelected}>Hide selected</button><button type="button" className="inspection-button" disabled={!hiddenIds.length} onClick={() => setHiddenIds([])}>Show hidden ({hiddenIds.length})</button></div>
     </div>
-  </div>;;
+  </div>;
 }
