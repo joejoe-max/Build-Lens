@@ -249,7 +249,7 @@ export default function Viewport({ view, showGrid = true, modelSpec = null, mode
     host.addEventListener("buildlens-model-change", onModelChange);
     host.addEventListener("buildlens-cutaway-change", onCutawayChange);
     host.addEventListener("buildlens-select-element", onSelection);
-    renderer.domElement.addEventListener("pointerdown", onSelect);
+    renderer.domElement.addEventListener("click", onSelect);
     host.__resetBuildLensCamera = resetCamera;
     host.__enterBuildLensModel = enterModel;
     host.__clearBuildLensMeasurements = clearMeasurements;
@@ -275,7 +275,7 @@ export default function Viewport({ view, showGrid = true, modelSpec = null, mode
       host.removeEventListener("buildlens-model-change", onModelChange);
       host.removeEventListener("buildlens-cutaway-change", onCutawayChange);
       host.removeEventListener("buildlens-select-element", onSelection);
-      renderer.domElement.removeEventListener("pointerdown", onSelect);
+      renderer.domElement.removeEventListener("click", onSelect);
       delete host.__resetBuildLensCamera;
       delete host.__enterBuildLensModel;
       delete host.__clearBuildLensMeasurements;
