@@ -106,6 +106,7 @@ const structuralSchema = {
         required: ["id", "base", "top", "width", "depth", "provenance"],
         properties: {
           ...memberBase, base: point3, top: point3, width: dimension, depth: dimension,
+          gridRefs: { type: "object", additionalProperties: false, properties: { x: { type: "string" }, z: { type: "string" } } },
         },
       },
     },
@@ -116,6 +117,7 @@ const structuralSchema = {
         required: ["id", "start", "end", "width", "depth", "provenance"],
         properties: {
           ...memberBase, start: point3, end: point3, width: dimension, depth: dimension,
+          startSupportId: { type: "string" }, endSupportId: { type: "string" },
         },
       },
     },
@@ -153,6 +155,7 @@ const structuralSchema = {
           type: { type: "string", enum: ["isolated", "strip", "combined", "raft", "pile_cap", "pile", "other"] },
           center: point3, width: dimension, length: dimension, depth: dimension,
           topElevation: signedMeasurement,
+          supportedElementIds: { type: "array", items: { type: "string" } },
           pileCount: { type: "integer", minimum: 1 },
         },
       },
@@ -358,7 +361,90 @@ export function validateBuildingModel(model) {
     }
   }
 
+  // Cross-reference checks: optional references are validated when supplied.
+  if (isObject(model.structure)) {
+    const elements = Object.values(model.structure).flatMap(items => Array.isArray(items) ? items : []);
+    const byId = new Map(elements.map(item => [item.id, item]));
+    const grids = new Map((model.grids || []).map(grid => [grid.id, grid]));
+    (model.structure.columns || []).forEach((column, i) => {
+      const refs = column.gridRefs;
+      if (!refs) return;
+      for (const axis of ["x", "z"]) {
+        if (!refs[axis]) continue;
+        const grid = grids.get(refs[axis]);
+        if (!grid || grid.axis !== axis) errors.push(`structure.columns[${i}].gridRefs.${axis} must reference an existing ${axis}-axis grid`);
+        else {
+          const coordinate = axis === "x" ? column.base?.x : column.base?.z;
+          if (isFiniteNumber(coordinate) && Math.abs(coordinate - grid.position) > 0.001) {
+            errors.push(`structure.columns[${i}] does not align with grid ${grid.label} on axis ${axis}`);
+          }
+        }
+      }
+    });
+    (model.structure.beams || []).forEach((beam, i) => {
+      for (const [endName, refName] of [["start", "startSupportId"], ["end", "endSupportId"]]) {
+        const supportId = beam[refName];
+        if (!supportId) continue;
+        const support = byId.get(supportId);
+        if (!support) {
+          errors.push(`structure.beams[${i}].${refName} references an unknown element`);
+          continue;
+        }
+        const point = beam[endName];
+        const candidates = support.base && support.top ? [support.base, support.top] : support.center ? [support.center] : [];
+        if (candidates.length && !candidates.some(candidate =>
+          Math.hypot(candidate.x - point.x, candidate.y - point.y, candidate.z - point.z) <= 0.01
+        )) errors.push(`structure.beams[${i}].${endName} does not meet support ${supportId}`);
+      }
+    });
+    (model.structure.foundations || []).forEach((foundation, i) => {
+      for (const id of foundation.supportedElementIds || []) {
+        const supported = byId.get(id);
+        if (!supported) errors.push(`structure.foundations[${i}] references unknown supported element ${id}`);
+        else if (supported.base && Math.hypot(supported.base.x - foundation.center.x, supported.base.z - foundation.center.z) >
+          Math.max(foundation.width.value, foundation.length.value) / 2 + 0.01) {
+          errors.push(`structure.foundations[${i}] is not beneath supported element ${id}`);
+        }
+      }
+    });
+  }
+
   return { valid: errors.length === 0, errors };
+}
+
+export function analyzeStructuralConnectivity(model) {
+  if (!isObject(model) || !isObject(model.structure)) return { connections: [], warnings: [] };
+  const { columns = [], beams = [], foundations = [] } = model.structure;
+  const tolerance = ({ m: 0.01, cm: 1, mm: 10, ft: 0.03 })[model.units] || 0.01;
+  const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
+  const connections = [];
+  const warnings = [];
+  const supports = [...columns, ...beams];
+  for (const beam of beams) {
+    for (const end of ["start", "end"]) {
+      const point = beam[end];
+      const explicitId = beam[end === "start" ? "startSupportId" : "endSupportId"];
+      const candidates = supports.filter(item => item.id !== beam.id).flatMap(item => {
+        const points = item.base && item.top ? [{ point: item.base, end: "base" }, { point: item.top, end: "top" }]
+          : item.start && item.end ? [{ point: item.start, end: "start" }, { point: item.end, end: "end" }] : [];
+        return points.map(candidate => ({ elementId: item.id, point: candidate.point, end: candidate.end, distance: distance(point, candidate.point) }));
+      }).sort((a, b) => a.distance - b.distance);
+      const match = explicitId ? candidates.find(item => item.elementId === explicitId && item.distance <= tolerance) : candidates[0];
+      if (match && match.distance <= tolerance) connections.push({ beamId: beam.id, beamEnd: end, supportId: match.elementId, supportEnd: match.end, distance: match.distance, status: explicitId ? "referenced" : "coordinate_match" });
+      else warnings.push({ code: "unconnected_beam_end", elementId: beam.id, endpoint: end, message: `Beam ${beam.id} ${end} does not meet a modeled column or beam endpoint within ${tolerance} ${model.units}.` });
+    }
+  }
+  for (const column of columns) {
+    const foundation = foundations.find(item =>
+      (item.supportedElementIds || []).includes(column.id) ||
+      (Math.abs(item.center.x - column.base.x) <= item.width.value / 2 + tolerance &&
+       Math.abs(item.center.z - column.base.z) <= item.length.value / 2 + tolerance &&
+       Math.abs((item.center.y + item.depth.value / 2) - column.base.y) <= tolerance * 2)
+    );
+    if (foundation) connections.push({ columnId: column.id, foundationId: foundation.id, status: "foundation_support" });
+    else warnings.push({ code: "column_without_foundation", elementId: column.id, message: `No matching foundation is modeled beneath column ${column.id}.` });
+  }
+  return { connections, warnings };
 }
 
 export function createEmptyBuildingModel({ id = "building-1", name = "Untitled building", units = "m" } = {}) {
