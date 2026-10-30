@@ -193,7 +193,9 @@ export default function App() {
     event?.preventDefault();
     const message = input.trim();
     if ((!message && !pendingAttachments.length) || busy) return;
-    const attachmentSnapshot = projectAttachments.slice(0, 8);
+    if (!attachmentsHydrated) { setNotice("Project documents are still loading. Please wait a moment and send again."); return; }
+    if (projectAttachments.length > 12) { setNotice("BuildLens can analyse up to 12 project documents per request. Remove or split the extra files first."); return; }
+    const attachmentSnapshot = projectAttachments.slice(0, 12);
     const history = messagesRef.current.filter(item => item && ["user", "assistant"].includes(item.role) && typeof item.content === "string" && item.content.trim()).slice(-20);
     const userText = message || `Please inspect the ${attachmentSnapshot.length} project file(s) and summarize what they contain.`;
     const attachmentNames = attachmentSnapshot.map(file => file.name);
