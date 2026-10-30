@@ -1,73 +1,98 @@
 import * as THREE from "three";
 
-// Demonstration geometry only. This function does not read or interpret drawings.
-export function createBuildingModel(scene) {
-  const building = new THREE.Group();
-  scene.add(building);
-  const materials = {
-    concrete: new THREE.MeshStandardMaterial({ color: "#a9b0b5", roughness: 0.82, metalness: 0.04 }),
-    slab: new THREE.MeshStandardMaterial({ color: "#737d85", roughness: 0.9, metalness: 0, transparent: false, opacity: 1, depthWrite: true }),
-    beam: new THREE.MeshStandardMaterial({ color: "#d2d7db", roughness: 0.7 }),
-    rebar: new THREE.MeshStandardMaterial({ color: "#c18b58", metalness: 0.62, roughness: 0.38 }),
-    ground: new THREE.MeshStandardMaterial({ color: "#282d31", roughness: 1 }),
-    foundation: new THREE.MeshStandardMaterial({ color: "#69747c", roughness: 0.92 })
-  };
-  const elements = [];
-  const addBox = (name, size, pos, material, category = "structure") => {
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(...size), material);
-    mesh.position.set(...pos);
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    mesh.userData = { name, category };
-    building.add(mesh); elements.push(mesh); return mesh;
-  };
-  const addRod = (name, start, end, radius = 0.025) => {
-    const a = new THREE.Vector3(...start), b = new THREE.Vector3(...end);
-    const direction = new THREE.Vector3().subVectors(b, a);
-    const mesh = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, direction.length(), 8), materials.rebar);
-    mesh.position.copy(a).add(b).multiplyScalar(0.5);
-    mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction.normalize());
-    mesh.castShadow = true;
-    mesh.userData = { name, category: "rebar" };
-    building.add(mesh); elements.push(mesh); return mesh;
-  };
+const MATERIALS = {
+  concrete: new THREE.MeshStandardMaterial({ color: "#a9b0b5", roughness: 0.82 }),
+  slab: new THREE.MeshStandardMaterial({ color: "#737d85", roughness: 0.9, side: THREE.DoubleSide }),
+  beam: new THREE.MeshStandardMaterial({ color: "#c5cbd0", roughness: 0.76 }),
+  wall: new THREE.MeshStandardMaterial({ color: "#89939a", roughness: 0.88, transparent: true, opacity: 0.82 }),
+  foundation: new THREE.MeshStandardMaterial({ color: "#69747c", roughness: 0.92 }),
+  rebar: new THREE.MeshStandardMaterial({ color: "#c18b58", metalness: 0.62, roughness: 0.38 })
+};
+const UNIT_SCALE = { m: 1, mm: 0.001, cm: 0.01, ft: 0.3048 };
+const vec = (p, s) => new THREE.Vector3(p.x * s, p.y * s, p.z * s);
 
-  addBox("Ground plane", [16, 0.08, 13], [0, -0.18, 0], materials.ground, "ground");
-  const xs = [-3, 0, 3], zs = [-2.5, 0, 2.5], floors = [0.18, 3.18, 6.18];
-  floors.forEach((y, floorIndex) => {
-    addBox(`Floor slab ${floorIndex + 1}`, [6.7, 0.16, 5.7], [0, y, 0], materials.slab, "slab");
-    if (floorIndex < floors.length - 1) {
-      const spacing = floors[floorIndex + 1] - y;
-      xs.forEach((x, xi) => zs.forEach((z, zi) => {
-        addBox(`Column ${floorIndex + 1}-${xi + 1}${zi + 1}`, [0.24, spacing - 0.16, 0.24], [x, y + spacing / 2, z], materials.concrete, "column");
-      }));
-      const beamY = floors[floorIndex + 1] - 0.19;
-      zs.forEach((z, i) => addBox(`Beam X-${floorIndex + 1}-${i + 1}`, [6, 0.22, 0.22], [0, beamY, z], materials.beam, "beam"));
-      xs.forEach((x, i) => addBox(`Beam Z-${floorIndex + 1}-${i + 1}`, [0.22, 0.22, 5], [x, beamY, 0], materials.beam, "beam"));
-    }
-  });
-  xs.forEach((x, xi) => zs.forEach((z, zi) => {
-    addBox(`Illustrative footing ${xi + 1}-${zi + 1}`, [0.95, 0.35, 0.95], [x, -0.42, z], materials.foundation, "foundation");
-  }));
+function addMesh(group, elements, mesh, id, category, label) {
+  mesh.castShadow = true; mesh.receiveShadow = true;
+  mesh.userData = { id, name: label || id, category };
+  group.add(mesh); elements.push(mesh); return mesh;
+}
+function addRod(group, elements, bar, scale, fallbackId) {
+  const a = vec(bar.start, scale), b = vec(bar.end, scale);
+  const direction = b.clone().sub(a), length = direction.length();
+  const diameter = bar.diameter?.value;
+  if (!Number.isFinite(length) || length <= 0 || !Number.isFinite(diameter) || diameter <= 0) return;
+  const mesh = new THREE.Mesh(new THREE.CylinderGeometry(diameter * scale / 2, diameter * scale / 2, length, 10), MATERIALS.rebar);
+  mesh.position.copy(a).add(b).multiplyScalar(0.5);
+  mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction.normalize());
+  addMesh(group, elements, mesh, bar.id || fallbackId, "reinforcement");
+}
+function addReinforcement(group, elements, item, scale) {
+  (item.reinforcement || []).forEach((layout, i) => (layout.bars || []).forEach((bar, j) => addRod(group, elements, bar, scale, `${item.id}-rebar-${i}-${j}`)));
+}
+function addSlab(group, elements, slab, scale, levelElevation) {
+  const y = (slab.elevation?.value ?? levelElevation) * scale;
+  const shape = new THREE.Shape();
+  slab.outline.forEach((p, i) => i ? shape.lineTo(p.x * scale, p.z * scale) : shape.moveTo(p.x * scale, p.z * scale));
+  shape.closePath();
+  const geometry = new THREE.ExtrudeGeometry(shape, { depth: slab.thickness.value * scale, bevelEnabled: false });
+  geometry.rotateX(Math.PI / 2);
+  const mesh = new THREE.Mesh(geometry, MATERIALS.slab);
+  mesh.position.y = y;
+  addMesh(group, elements, mesh, slab.id, "slabs", slab.label);
+}
+function createFromSpec(scene, model) {
+  const group = new THREE.Group(); group.name = `BuildLens: ${model.name}`; scene.add(group);
+  const elements = [], s = UNIT_SCALE[model.units] || 1;
+  const levels = new Map((model.levels || []).map(level => [level.id, level.elevation.value]));
+  for (const c of model.structure.columns || []) {
+    const a = vec(c.base, s), b = vec(c.top, s), d = b.clone().sub(a), length = d.length();
+    if (!length) continue;
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(c.width.value*s, length, c.depth.value*s), MATERIALS.concrete);
+    mesh.position.copy(a).add(b).multiplyScalar(.5);
+    mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0), d.normalize());
+    addMesh(group,elements,mesh,c.id,"columns",c.label); addReinforcement(group,elements,c,s);
+  }
+  for (const b of model.structure.beams || []) {
+    const a=vec(b.start,s), z=vec(b.end,s), d=z.clone().sub(a), length=d.length(); if(!length) continue;
+    const mesh=new THREE.Mesh(new THREE.BoxGeometry(length,b.depth.value*s,b.width.value*s),MATERIALS.beam);
+    mesh.position.copy(a).add(z).multiplyScalar(.5);
+    mesh.quaternion.setFromUnitVectors(new THREE.Vector3(1,0,0),d.normalize());
+    addMesh(group,elements,mesh,b.id,"beams",b.label); addReinforcement(group,elements,b,s);
+  }
+  for (const slab of model.structure.slabs || []) {
+    const elevation=slab.levelId && levels.has(slab.levelId) ? levels.get(slab.levelId) : (levels.values().next().value ?? 0);
+    addSlab(group,elements,slab,s,elevation); addReinforcement(group,elements,slab,s);
+  }
+  for (const w of model.structure.walls || []) {
+    const a=vec(w.start,s), b=vec(w.end,s), d=b.clone().sub(a), length=d.length(); if(!length) continue;
+    const h=w.height.value*s, mesh=new THREE.Mesh(new THREE.BoxGeometry(length,h,w.thickness.value*s),MATERIALS.wall);
+    mesh.position.copy(a).add(b).multiplyScalar(.5); mesh.position.y+=h/2;
+    mesh.quaternion.setFromUnitVectors(new THREE.Vector3(1,0,0),d.normalize());
+    addMesh(group,elements,mesh,w.id,"walls",w.label); addReinforcement(group,elements,w,s);
+  }
+  for (const f of model.structure.foundations || []) {
+    const mesh=new THREE.Mesh(new THREE.BoxGeometry(f.width.value*s,f.depth.value*s,f.length.value*s),MATERIALS.foundation);
+    mesh.position.copy(vec(f.center,s));
+    addMesh(group,elements,mesh,f.id,"foundations",f.label); addReinforcement(group,elements,f,s);
+  }
+  for (const grid of model.grids || []) {
+    const extent=Math.max(10,...elements.map(e=>e.position.length()))*1.4, p=grid.position*s;
+    const points=grid.axis==="x" ? [new THREE.Vector3(p,0,-extent),new THREE.Vector3(p,0,extent)] : [new THREE.Vector3(-extent,0,p),new THREE.Vector3(extent,0,p)];
+    const line=new THREE.Line(new THREE.BufferGeometry().setFromPoints(points),new THREE.LineBasicMaterial({color:"#78838b"}));
+    addMesh(group,elements,line,grid.id,"grids",grid.label);
+  }
+  return { building: group, elements };
+}
 
-  // Visible reinforcement demonstration: slab mesh, column longitudinal bars,
-  // and beam bars. These are illustrative only, not a reinforcement design.
-  floors.forEach((y, floorIndex) => {
-    const barY = y + 0.115;
-    for (let i = 0; i < 5; i++) {
-      const z = -2.2 + i * 1.1;
-      addRod(`Slab ${floorIndex + 1} bar X-${i + 1}`, [-3.0, barY, z], [3.0, barY, z], 0.018);
-    }
-    for (let i = 0; i < 6; i++) {
-      const x = -2.8 + i * 1.12;
-      addRod(`Slab ${floorIndex + 1} bar Z-${i + 1}`, [x, barY + 0.025, -2.5], [x, barY + 0.025, 2.5], 0.018);
-    }
-  });
-  xs.forEach((x, xi) => zs.forEach((z, zi) => {
-    const offsets = [-0.075, 0.075];
-    offsets.forEach((dx, n) => offsets.forEach((dz, m) => {
-      addRod(`Column reinforcement ${xi + 1}-${zi + 1} ${n + 1}${m + 1}`, [x + dx, 0.28, z + dz], [x + dx, 6.05, z + dz], 0.022);
-    }));
-  }));
-  return { building, elements };
+// Placeholder only: shown until a validated project-specific model is supplied.
+function createSample(scene) {
+  const group=new THREE.Group(); scene.add(group); const elements=[];
+  const add=(id,size,pos,material,category)=>{const mesh=new THREE.Mesh(new THREE.BoxGeometry(...size),material);mesh.position.set(...pos);addMesh(group,elements,mesh,id,category);};
+  const xs=[-3,0,3],zs=[-2.5,0,2.5],ys=[.18,3.18,6.18];
+  ys.forEach((y,i)=>{add("Sample slab "+i,[6.7,.16,5.7],[0,y,0],MATERIALS.slab,"slabs");if(i<2){xs.forEach(x=>zs.forEach(z=>add("Sample column",[.24,2.84,.24],[x,y+1.5,z],MATERIALS.concrete,"columns")));zs.forEach(z=>add("Sample beam",[6,.22,.22],[0,ys[i+1]-.19,z],MATERIALS.beam,"beams"));xs.forEach(x=>add("Sample beam",[.22,.22,5],[x,ys[i+1]-.19,0],MATERIALS.beam,"beams"));}});
+  xs.forEach(x=>zs.forEach(z=>add("Sample footing",[.95,.35,.95],[x,-.42,z],MATERIALS.foundation,"foundations")));
+  return {building:group,elements};
+}
+export function createBuildingModel(scene, modelSpec = null) {
+  return modelSpec ? createFromSpec(scene, modelSpec) : createSample(scene);
 }
