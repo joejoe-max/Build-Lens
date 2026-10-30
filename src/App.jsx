@@ -32,6 +32,7 @@ async function readAttachment(file) {
     const pdf = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
     const pages = [];
     const pageImages = [];
+    const previewPages = new Set([1, Math.ceil(Math.min(pdf.numPages, 35) / 2), Math.min(pdf.numPages, 35)]);
     for (let pageNumber = 1; pageNumber <= Math.min(pdf.numPages, 35); pageNumber++) {
       const page = await pdf.getPage(pageNumber);
       const content = await page.getTextContent();
@@ -39,7 +40,7 @@ async function readAttachment(file) {
       if (text) pages.push(`[Page ${pageNumber}]\n${text}`);
       // Extract both selectable text and visual page previews so drawings,
       // schedules and scanned pages remain available to the vision model.
-      if (pageNumber <= 2) {
+      if (previewPages.has(pageNumber)) {
         const base = page.getViewport({ scale: 1 });
         const viewport = page.getViewport({ scale: Math.min(1.25, 1100 / base.width) });
         const canvas = document.createElement("canvas");
@@ -53,7 +54,7 @@ async function readAttachment(file) {
     }
     const extracted = pages.join("\n\n");
     if (!extracted && !pageImages.length) throw new Error(`${file.name} could not be read. Try exporting it again as a standard PDF.`);
-    return { id: crypto.randomUUID(), name: file.name, type: "application/pdf", kind: "text", content: extracted.slice(0, 45000), pageImages, status: extracted ? `Text + ${pageImages.length} page preview(s) ready` : `Scanned PDF · ${pageImages.length} page image(s) ready` };
+    return { id: crypto.randomUUID(), name: file.name, type: "application/pdf", kind: "text", content: extracted.slice(0, 45000), pageImages, status: extracted ? `Text + representative page previews (${pageImages.map(page => page.pageNumber).join(", ")}) ready` : `Scanned PDF · representative pages ${pageImages.map(page => page.pageNumber).join(", ")} ready` };
   }
   if (extension === "docx") {
     const result = await mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() });
