@@ -69,7 +69,9 @@ async function readAttachment(file) {
 export default function App() {
   const [view, setView] = useState("building");
   const [files, setFiles] = useState([]);
-  const [pendingAttachments, setPendingAttachments] = useState([]);\n  const [projectAttachments, setProjectAttachments] = useState([]);\n  const messagesRef = useRef([]);
+  const [pendingAttachments, setPendingAttachments] = useState([]);
+  const [projectAttachments, setProjectAttachments] = useState([]);
+  const messagesRef = useRef([]);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -115,7 +117,8 @@ export default function App() {
     }
     if (next.length) {
       setFiles(current => [...current, ...next.map(({ id, name, type, status }) => ({ id, name, kind: name.split(".").pop().toUpperCase(), type, status }))]);
-      setPendingAttachments(current => [...current, ...next]);\n      setProjectAttachments(current => [...current, ...next]);
+      setPendingAttachments(current => [...current, ...next]);
+      setProjectAttachments(current => [...current, ...next]);
       setNotice(`${next.length} file(s) ready. Add a question and send them to the assistant.`);
     }
     if (failures.length) setNotice(failures.slice(0, 3).join(" · "));
@@ -124,11 +127,13 @@ export default function App() {
 
   const removeFile = id => {
     setFiles(current => current.filter(file => file.id !== id));
-    setPendingAttachments(current => current.filter(file => file.id !== id));\n    setProjectAttachments(current => current.filter(file => file.id !== id));
+    setPendingAttachments(current => current.filter(file => file.id !== id));
+    setProjectAttachments(current => current.filter(file => file.id !== id));
   };
 
   const startNewChat = () => {
     if (busy) return;
+    messagesRef.current = [];
     setMessages([]);
     setHasStartedChat(true);
     setInput("");
