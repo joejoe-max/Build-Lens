@@ -29,24 +29,23 @@ export default function Viewport({ view, showGrid = true }) {
       host.appendChild(fallback);
       return () => fallback.remove();
     }
+
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.domElement.style.touchAction = "none";
     host.appendChild(renderer.domElement);
-
     scene.add(new THREE.HemisphereLight(0xc8d5e0, 0x282a2d, 2.1));
     const key = new THREE.DirectionalLight(0xffffff, 2.5);
-    key.position.set(7, 12, 8);
-    key.castShadow = true;
-    scene.add(key);
+    key.position.set(7, 12, 8); key.castShadow = true; scene.add(key);
     const { elements } = createBuildingModel(scene);
     const grid = new THREE.GridHelper(16, 32, "#495159", "#30363b");
-    grid.position.y = -0.12;
-    scene.add(grid);
+    grid.position.y = -0.12; scene.add(grid);
 
-    let previousX = 0, previousY = 0, dragging = false;
     let azimuth = Math.PI / 4, elevation = 0.55, distance = 15;
+    let draggingPointer = null, previousX = 0, previousY = 0, pinchDistance = 0;
+    const pointers = new Map();
     const target = new THREE.Vector3(0, 3, 0);
     const updateCamera = () => {
       elevation = Math.max(0.12, Math.min(1.35, elevation));
@@ -55,32 +54,47 @@ export default function Viewport({ view, showGrid = true }) {
       camera.lookAt(target);
     };
     const resetCamera = () => { azimuth = Math.PI / 4; elevation = 0.55; distance = 15; target.set(0, 3, 0); updateCamera(); };
-    updateCamera();
-    const onPointerDown = e => { dragging = true; previousX = e.clientX; previousY = e.clientY; renderer.domElement.setPointerCapture?.(e.pointerId); };
-    const onPointerMove = e => {
-      if (!dragging) return;
-      azimuth -= (e.clientX - previousX) * 0.008;
-      elevation += (e.clientY - previousY) * 0.006;
-      previousX = e.clientX; previousY = e.clientY; updateCamera();
+    const getPinchDistance = () => {
+      const pts = [...pointers.values()];
+      return pts.length >= 2 ? Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) : 0;
     };
-    const onPointerUp = () => { dragging = false; };
-    const onWheel = e => { e.preventDefault(); distance += e.deltaY * 0.012; updateCamera(); };
-    const onTouchMove = e => {
-      if (e.touches.length === 2) {
-        const next = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
-        if (host.__touchDistance) distance += (host.__touchDistance - next) * 0.025;
-        host.__touchDistance = next; updateCamera();
+    const onPointerDown = e => {
+      renderer.domElement.setPointerCapture?.(e.pointerId);
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pointers.size === 1) { draggingPointer = e.pointerId; previousX = e.clientX; previousY = e.clientY; }
+      if (pointers.size === 2) { draggingPointer = null; pinchDistance = getPinchDistance(); }
+    };
+    const onPointerMove = e => {
+      if (!pointers.has(e.pointerId)) return;
+      const previous = pointers.get(e.pointerId);
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pointers.size >= 2) {
+        const nextDistance = getPinchDistance();
+        if (pinchDistance > 0 && nextDistance > 0) distance += (pinchDistance - nextDistance) * 0.025;
+        pinchDistance = nextDistance; updateCamera(); return;
+      }
+      if (draggingPointer === e.pointerId) {
+        azimuth -= (e.clientX - previous.x) * 0.008;
+        elevation += (e.clientY - previous.y) * 0.006;
+        updateCamera();
       }
     };
-    const onTouchEnd = () => { host.__touchDistance = 0; };
+    const onPointerUp = e => {
+      pointers.delete(e.pointerId);
+      if (draggingPointer === e.pointerId) draggingPointer = null;
+      pinchDistance = pointers.size === 2 ? getPinchDistance() : 0;
+      if (pointers.size === 1) {
+        const [id, point] = [...pointers.entries()][0];
+        draggingPointer = id; previousX = point.x; previousY = point.y;
+      }
+    };
+    const onWheel = e => { e.preventDefault(); distance += e.deltaY * 0.012; updateCamera(); };
     const onReset = () => resetCamera();
     renderer.domElement.addEventListener("pointerdown", onPointerDown);
     renderer.domElement.addEventListener("pointermove", onPointerMove);
     renderer.domElement.addEventListener("pointerup", onPointerUp);
     renderer.domElement.addEventListener("pointercancel", onPointerUp);
     renderer.domElement.addEventListener("wheel", onWheel, { passive: false });
-    renderer.domElement.addEventListener("touchmove", onTouchMove, { passive: true });
-    renderer.domElement.addEventListener("touchend", onTouchEnd, { passive: true });
     host.addEventListener("buildlens-reset", onReset);
     host.__resetBuildLensCamera = resetCamera;
 
@@ -105,10 +119,8 @@ export default function Viewport({ view, showGrid = true }) {
       renderer.domElement.removeEventListener("pointerup", onPointerUp);
       renderer.domElement.removeEventListener("pointercancel", onPointerUp);
       renderer.domElement.removeEventListener("wheel", onWheel);
-      renderer.domElement.removeEventListener("touchmove", onTouchMove);
-      renderer.domElement.removeEventListener("touchend", onTouchEnd);
       host.removeEventListener("buildlens-reset", onReset);
-      delete host.__resetBuildLensCamera; delete host.__touchDistance;
+      delete host.__resetBuildLensCamera;
       scene.traverse(obj => {
         if (obj.geometry) obj.geometry.dispose();
         if (obj.material) (Array.isArray(obj.material) ? obj.material : [obj.material]).forEach(material => material.dispose());
