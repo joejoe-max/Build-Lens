@@ -1,8 +1,8 @@
-export async function askBuildLens({ message, history = [] }) {
+export async function askBuildLens({ message, history = [], attachments = [] }) {
   const response = await fetch("/api/ai", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message, history })
+    body: JSON.stringify({ message, history, attachments })
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(payload.error || "The AI request failed.");
