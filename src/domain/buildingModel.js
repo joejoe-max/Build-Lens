@@ -231,6 +231,16 @@ export const BUILDING_MODEL_SCHEMA = {
 
 const isObject = value => value !== null && typeof value === "object" && !Array.isArray(value);
 const isFiniteNumber = value => typeof value === "number" && Number.isFinite(value);
+function pointInPolygon(point, polygon) {
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const a = polygon[i], b = polygon[j];
+    const intersects = ((a.z > point.z) !== (b.z > point.z)) &&
+      (point.x < (b.x - a.x) * (point.z - a.z) / ((b.z - a.z) || Number.EPSILON) + a.x);
+    if (intersects) inside = !inside;
+  }
+  return inside;
+}
 
 function checkPoint(point, dimensions, path, errors) {
   if (!isObject(point)) {
@@ -339,7 +349,12 @@ export function validateBuildingModel(model) {
             else item.openings.forEach((opening, j) => {
               const op = `${path}.openings[${j}]`;
               if (!opening || typeof opening.id !== "string" || !opening.id.trim() || !Array.isArray(opening.outline) || opening.outline.length < 3) errors.push(`${op} requires an id and a polygon outline`);
-              else opening.outline.forEach((point, k) => checkPoint(point, ["x", "z"], `${op}.outline[${k}]`, errors));
+              else {
+                opening.outline.forEach((point, k) => checkPoint(point, ["x", "z"], `${op}.outline[${k}]`, errors));
+                if (Array.isArray(item.outline) && opening.outline.some(point => isFiniteNumber(point.x) && isFiniteNumber(point.z) && !pointInPolygon(point, item.outline))) {
+                  errors.push(`${op} must lie inside the slab outline`);
+                }
+              }
             });
           }
         } else if (category === "walls") {
@@ -348,12 +363,20 @@ export function validateBuildingModel(model) {
           checkDimension(item.height, `${path}.height`, errors);
           checkDimension(item.thickness, `${path}.thickness`, errors);
           const wallLength = Math.hypot((item.end?.x || 0) - (item.start?.x || 0), (item.end?.z || 0) - (item.start?.z || 0));
-          for (const [j, opening] of (item.openings || []).entries()) {
+          if (item.openings !== undefined && !Array.isArray(item.openings)) errors.push(`${path}.openings must be an array`);
+          const wallOpenings = Array.isArray(item.openings) ? item.openings : [];
+          for (const [j, opening] of wallOpenings.entries()) {
             const op = `${path}.openings[${j}]`;
+            if (!isObject(opening) || typeof opening.id !== "string" || !opening.id.trim()) { errors.push(`${op}.id is required`); continue; }
             for (const key of ["positionFromStart", "width", "height"]) checkDimension(opening[key], `${op}.${key}`, errors);
             if (opening.sillHeight) checkDimension(opening.sillHeight, `${op}.sillHeight`, errors);
             if (isFiniteNumber(opening.positionFromStart?.value) && isFiniteNumber(opening.width?.value) && opening.positionFromStart.value + opening.width.value > wallLength + 0.001) errors.push(`${op} extends beyond the wall length`);
             if (isFiniteNumber(opening.height?.value) && isFiniteNumber(item.height?.value) && isFiniteNumber(opening.sillHeight?.value || 0) && opening.height.value + (opening.sillHeight?.value || 0) > item.height.value + 0.001) errors.push(`${op} extends beyond the wall height`);
+            for (const other of wallOpenings.slice(0,j)) {
+              if (isFiniteNumber(opening.positionFromStart?.value) && isFiniteNumber(opening.width?.value) && isFiniteNumber(other.positionFromStart?.value) && isFiniteNumber(other.width?.value) &&
+                opening.positionFromStart.value < other.positionFromStart.value + other.width.value &&
+                other.positionFromStart.value < opening.positionFromStart.value + opening.width.value) errors.push(`${op} overlaps another wall opening`);
+            }
           }
         } else if (category === "stairs") {
           checkPoint(item.start, ["x", "y", "z"], `${path}.start`, errors);
