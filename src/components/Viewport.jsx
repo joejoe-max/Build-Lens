@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { createBuildingModel } from "../three/BuildingModel.js";
@@ -17,11 +17,18 @@ export default function Viewport({ view, showGrid = true, modelSpec = null, mode
   const actionsRef = useRef(modelActions);
   const viewRef = useRef(view);
   const showGridRef = useRef(showGrid);
+  const cutawayRef = useRef({ enabled: false, axis: "y", position: 0.5 });
+  const hiddenIdsRef = useRef(new Set());
+  const [cutaway, setCutaway] = useState({ enabled: false, axis: "y", position: 0.5 });
+  const [selectedElement, setSelectedElement] = useState(null);
+  const [hiddenIds, setHiddenIds] = useState([]);
 
   useEffect(() => { modelSpecRef.current = modelSpec; }, [modelSpec]);
   useEffect(() => { actionsRef.current = modelActions; }, [modelActions]);
   useEffect(() => { viewRef.current = view; }, [view]);
   useEffect(() => { showGridRef.current = showGrid; }, [showGrid]);
+  useEffect(() => { cutawayRef.current = cutaway; hostRef.current?.dispatchEvent(new CustomEvent("buildlens-cutaway-change")); }, [cutaway]);
+  useEffect(() => { hiddenIdsRef.current = new Set(hiddenIds); hostRef.current?.dispatchEvent(new CustomEvent("buildlens-model-change")); }, [hiddenIds]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -44,6 +51,7 @@ export default function Viewport({ view, showGrid = true, modelSpec = null, mode
       return () => fallback.remove();
     }
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
+    renderer.localClippingEnabled = true;
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -66,6 +74,9 @@ export default function Viewport({ view, showGrid = true, modelSpec = null, mode
     let modelGroup = null;
     let modelElements = [];
     let connectivityBadge = null;
+    const cutPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+    const raycaster = new THREE.Raycaster();
+    const pointer = new THREE.Vector2();
     const visibility = new Map();
     const applyVisibility = () => {
       const latest = new Map();
@@ -83,7 +94,7 @@ export default function Viewport({ view, showGrid = true, modelSpec = null, mode
             if (categoryAction.elementIds.includes(element.userData.id)) visible = categoryAction.visible;
           } else visible = categoryAction.visible;
         }
-        element.visible = visible;
+        element.visible = visible && !hiddenIdsRef.current.has(element.userData.id);
       }
       grid.visible = showGridRef.current && viewRef.current !== "foundation";
     };
@@ -114,6 +125,38 @@ export default function Viewport({ view, showGrid = true, modelSpec = null, mode
       controls.maxDistance = maxDim * 20;
       controls.update();
     };
+    const updateCutaway = () => {
+      const state = cutawayRef.current;
+      if (!state.enabled || !modelGroup) { renderer.clippingPlanes = []; return; }
+      const bounds = new THREE.Box3().setFromObject(modelGroup);
+      if (bounds.isEmpty()) { renderer.clippingPlanes = []; return; }
+      const axisIndex = ({ x: 0, y: 1, z: 2 })[state.axis] ?? 1;
+      const min = [bounds.min.x, bounds.min.y, bounds.min.z][axisIndex];
+      const max = [bounds.max.x, bounds.max.y, bounds.max.z][axisIndex];
+      const coordinate = min + (max - min) * Math.max(0, Math.min(1, state.position));
+      const normal = new THREE.Vector3(state.axis === "x" ? 1 : 0, state.axis === "y" ? 1 : 0, state.axis === "z" ? 1 : 0);
+      cutPlane.set(normal, -coordinate); renderer.clippingPlanes = [cutPlane];
+    };
+    const onCutawayChange = () => { updateCutaway(); renderer.render(scene, camera); };
+    const onSelect = event => {
+      if (event.button !== 0 || !modelElements.length) return;
+      const rect = renderer.domElement.getBoundingClientRect();
+      pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+      pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+      raycaster.setFromCamera(pointer, camera);
+      const hits = raycaster.intersectObjects(modelElements.filter(item => item.visible), false);
+      const data = hits[0]?.object?.userData;
+      host.dispatchEvent(new CustomEvent("buildlens-select-element", { detail: data ? { id: data.id, name: data.name, category: data.category } : null }));
+    };
+    const onSelection = event => setSelectedElement(event.detail || null);
+    const enterModel = () => {
+      if (!modelGroup) return;
+      const bounds = new THREE.Box3().setFromObject(modelGroup); if (bounds.isEmpty()) return;
+      const center = bounds.getCenter(new THREE.Vector3()); const size = bounds.getSize(new THREE.Vector3());
+      const span = Math.max(size.x, size.y, size.z, 1); controls.target.copy(center);
+      camera.position.set(center.x + span * 0.12, center.y + span * 0.08, center.z + span * 0.12);
+      controls.minDistance = Math.max(0.05, span * 0.002); controls.update();
+    };
     const rebuild = () => {
       if (modelGroup) disposeGroup(modelGroup);
       const created = createBuildingModel(scene, modelSpecRef.current);
@@ -134,6 +177,7 @@ export default function Viewport({ view, showGrid = true, modelSpec = null, mode
       if (modelSpecRef.current) fitCamera(modelGroup);
       else { controls.target.set(0, 3, 0); camera.position.set(11, 10, 13); controls.update(); }
       applyVisibility();
+      updateCutaway();
       renderer.render(scene, camera);
     };
     rebuild();
@@ -146,7 +190,11 @@ export default function Viewport({ view, showGrid = true, modelSpec = null, mode
     const onModelChange = () => rebuild();
     host.addEventListener("buildlens-reset", onReset);
     host.addEventListener("buildlens-model-change", onModelChange);
+    host.addEventListener("buildlens-cutaway-change", onCutawayChange);
+    host.addEventListener("buildlens-select-element", onSelection);
+    renderer.domElement.addEventListener("pointerdown", onSelect);
     host.__resetBuildLensCamera = resetCamera;
+    host.__enterBuildLensModel = enterModel;
 
     const resize = () => {
       const width = Math.max(1, host.clientWidth), height = Math.max(1, host.clientHeight);
@@ -158,7 +206,7 @@ export default function Viewport({ view, showGrid = true, modelSpec = null, mode
     const render = () => {
       if (!active) return;
       frame = requestAnimationFrame(render);
-      controls.update(); applyVisibility(); renderer.render(scene, camera);
+      controls.update(); applyVisibility(); updateCutaway(); renderer.render(scene, camera);
     };
     render();
 
@@ -167,7 +215,11 @@ export default function Viewport({ view, showGrid = true, modelSpec = null, mode
       active = false; cancelAnimationFrame(frame); observer.disconnect();
       host.removeEventListener("buildlens-reset", onReset);
       host.removeEventListener("buildlens-model-change", onModelChange);
+      host.removeEventListener("buildlens-cutaway-change", onCutawayChange);
+      host.removeEventListener("buildlens-select-element", onSelection);
+      renderer.domElement.removeEventListener("pointerdown", onSelect);
       delete host.__resetBuildLensCamera;
+      delete host.__enterBuildLensModel;
       sceneState.current = null; controls.dispose(); disposeGroup(modelGroup);
       if (connectivityBadge) connectivityBadge.remove();
       scene.traverse(object => {
@@ -190,5 +242,22 @@ export default function Viewport({ view, showGrid = true, modelSpec = null, mode
     if (host) host.dispatchEvent(new CustomEvent("buildlens-model-change"));
   }, [view, showGrid]);
 
-  return <div className="viewport-canvas" ref={hostRef} aria-label="Interactive 3D building model" />;
+  const hideSelected = () => {
+    if (!selectedElement) return;
+    setHiddenIds(current => current.includes(selectedElement.id) ? current : [...current, selectedElement.id]);
+    setSelectedElement(null);
+  };
+  return <div className="viewport-canvas" ref={hostRef} aria-label="Interactive 3D building model">
+    <div className="viewport-inspection-tools" onPointerDown={event => event.stopPropagation()}>
+      <div className="inspection-row">
+        <button type="button" className={cutaway.enabled ? "inspection-button active" : "inspection-button"} onClick={() => setCutaway(current => ({ ...current, enabled: !current.enabled }))}>{cutaway.enabled ? "Cutaway on" : "Cutaway"}</button>
+        <select aria-label="Cutaway axis" value={cutaway.axis} onChange={event => setCutaway(current => ({ ...current, axis: event.target.value }))}><option value="y">Horizontal</option><option value="x">Vertical X</option><option value="z">Vertical Z</option></select>
+        <button type="button" className="inspection-button" onClick={() => { setCutaway({ enabled: false, axis: "y", position: 0.5 }); setHiddenIds([]); }}>Reset</button>
+        <button type="button" className="inspection-button" onClick={() => hostRef.current?.__resetBuildLensCamera?.()}>Fit</button>
+        <button type="button" className="inspection-button" onClick={() => hostRef.current?.__enterBuildLensModel?.()}>Enter model</button>
+      </div>
+      <div className="inspection-row inspection-slider-row"><span>Section position</span><input aria-label="Cutaway section position" type="range" min="0" max="100" value={Math.round(cutaway.position * 100)} onChange={event => setCutaway(current => ({ ...current, position: Number(event.target.value) / 100 }))} disabled={!cutaway.enabled}/></div>
+      <div className="inspection-row selection-row"><span>{selectedElement ? "Selected: " + selectedElement.name + " · " + selectedElement.category : "Tap a structural element to inspect it"}</span><button type="button" className="inspection-button" disabled={!selectedElement} onClick={hideSelected}>Hide selected</button><button type="button" className="inspection-button" disabled={!hiddenIds.length} onClick={() => setHiddenIds([])}>Show hidden ({hiddenIds.length})</button></div>
+    </div>
+  </div>;;
 }
