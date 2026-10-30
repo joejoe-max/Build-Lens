@@ -17,7 +17,18 @@ export default function Viewport({ view, showGrid = true }) {
     scene.background = new THREE.Color("#15181b");
     scene.fog = new THREE.Fog("#15181b", 18, 38);
     const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 100);
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+    let renderer;
+    try {
+      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+    } catch (error) {
+      console.error("BuildLens could not initialize WebGL:", error);
+      const fallback = document.createElement("div");
+      fallback.setAttribute("role", "status");
+      fallback.style.cssText = "position:absolute;inset:0;display:grid;place-content:center;gap:10px;padding:24px;text-align:center;background:#15181b;color:#e8ebee;font:13px/1.6 system-ui,sans-serif";
+      fallback.innerHTML = '<strong>3D preview is unavailable on this browser</strong><span style="color:#9ba6ad;font-size:12px">The workspace is still available. Try a browser or device with WebGL enabled.</span>';
+      host.appendChild(fallback);
+      return () => fallback.remove();
+    }
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
