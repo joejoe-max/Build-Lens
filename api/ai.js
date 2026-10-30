@@ -484,7 +484,7 @@ export default async function handler(req, res) {
     if (!validation.valid) return res.status(400).json({ error: "The current project model is invalid.", details: validation.errors.slice(0, 20) });
   }
 
-  const state = { model: currentModel, actions: [], findings: [] };
+  const state = { model: currentModel, actions: [], findings: [], toolErrors: [] };
   const modelContext = currentModel
     ? "\n\nCurrent validated project model (preserve its existing verified data unless instructed otherwise):\n" + JSON.stringify(currentModel).slice(0, 50000)
     : "\n\nNo building model has been generated for this project yet.";
@@ -500,7 +500,7 @@ export default async function handler(req, res) {
     let completed = false;
 
     // Bounded tool loop: Meta may request multiple tools in one turn or across turns.
-    for (let turn = 0; turn < 5; turn++) {
+    for (let turn = 0; turn < 8; turn++) {
       payload = await callMeta({ apiKey, messages });
       const choice = payload?.choices?.[0];
       const assistantMessage = choice?.message || {};
@@ -531,12 +531,41 @@ export default async function handler(req, res) {
         } catch {
           result = { ok: false, error: "Tool arguments were not valid JSON. Please retry with valid structured arguments." };
         }
+        if (!result?.ok) {
+          state.toolErrors.push({ tool: call.function?.name || "unknown", error: result?.error || "Tool execution failed.", details: result?.validationErrors || [] });
+          state.toolErrors = state.toolErrors.slice(-12);
+        }
         messages.push({ role: "tool", tool_call_id: call.id, content: JSON.stringify(result) });
       }
     }
 
     if (!completed) {
-      finalAnswer = "I processed the available model commands, but the tool-call sequence reached its safety limit. Please tell me what you want to do next.";
+      // Give the model one final tool-free turn to explain the actual outcome.
+      // This prevents a generic safety-limit message from hiding a failed
+      // validation or leaving the user unaware that no model was created.
+      const failureContext = state.toolErrors.length
+        ? "\\nTool execution failures: " + JSON.stringify(state.toolErrors).slice(0, 12000)
+        : "\\nThe tool-call sequence exceeded eight rounds. Completed actions: " + JSON.stringify(state.actions.map(action => action.type));
+      try {
+        const closing = await callMeta({
+          apiKey,
+          messages: [...messages, {
+            role: "user",
+            content: "Stop calling tools. Give the user a concise, truthful status report. State explicitly whether a 3D model was actually created. Explain the tool failures or unfinished step using this execution information: " + failureContext + ". Do not claim that a model exists unless a successful render_building_model or update_building_model action completed."
+          }],
+          useTools: false
+        });
+        const closingChoice = closing?.choices?.[0];
+        finalAnswer = getText(closingChoice?.message?.content) || "";
+        completed = Boolean(finalAnswer.trim());
+      } catch (closingError) {
+        console.error("BuildLens final status generation failed:", closingError?.name || "Error");
+      }
+      if (!completed) {
+        finalAnswer = state.toolErrors.length
+          ? "I could not complete the 3D reconstruction. The model-generation tools returned errors: " + state.toolErrors.map(item => item.tool + ": " + item.error).join("; ")
+          : "I could not complete the 3D reconstruction because the AI kept requesting additional tool operations. No new model was confirmed.";
+      }
     }
 
     if (!finalAnswer.trim() && state.actions.length) {
