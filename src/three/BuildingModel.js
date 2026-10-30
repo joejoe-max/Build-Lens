@@ -12,12 +12,12 @@ const MATERIALS = {
 const UNIT_SCALE = { m: 1, mm: 0.001, cm: 0.01, ft: 0.3048 };
 const vec = (p, s) => new THREE.Vector3(p.x * s, p.y * s, p.z * s);
 
-function addMesh(group, elements, mesh, id, category, label) {
+function addMesh(group, elements, mesh, id, category, label, metadata = {}) {
   mesh.castShadow = true; mesh.receiveShadow = true;
-  mesh.userData = { id, name: label || id, category };
+  mesh.userData = { id, name: label || id, category, ...metadata };
   group.add(mesh); elements.push(mesh); return mesh;
 }
-function addRod(group, elements, bar, scale, fallbackId) {
+function addRod(group, elements, bar, scale, fallbackId, owner, layout, layoutIndex) {
   const a = vec(bar.start, scale), b = vec(bar.end, scale);
   const direction = b.clone().sub(a), length = direction.length();
   const diameter = bar.diameter?.value;
@@ -25,15 +25,15 @@ function addRod(group, elements, bar, scale, fallbackId) {
   const mesh = new THREE.Mesh(new THREE.CylinderGeometry(diameter * scale / 2, diameter * scale / 2, length, 10), MATERIALS.rebar);
   mesh.position.copy(a).add(b).multiplyScalar(0.5);
   mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction.normalize());
-  addMesh(group, elements, mesh, bar.id || fallbackId, "reinforcement");
+  addMesh(group, elements, mesh, bar.id || fallbackId, "reinforcement", bar.id || fallbackId, { ownerId: owner.id, ownerName: owner.label || owner.id, reinforcementType: layout.arrangement || "longitudinal", diameter: diameter, spacing: layout.spacing?.value ?? null, cover: layout.cover?.value ?? null, quantity: layout.quantity ?? (layout.bars?.length || 1), provenance: bar.provenance || layout.provenance || null, layoutIndex });
 }
-function addCylinderBetween(group, elements, a, b, diameter, id) {
+function addCylinderBetween(group, elements, a, b, diameter, id, metadata = {}) {
   const direction = b.clone().sub(a), length = direction.length();
   if (length <= 0) return;
   const mesh = new THREE.Mesh(new THREE.CylinderGeometry(diameter / 2, diameter / 2, length, 8), MATERIALS.rebar);
   mesh.position.copy(a).add(b).multiplyScalar(0.5);
   mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction.normalize());
-  addMesh(group, elements, mesh, id, "reinforcement");
+  addMesh(group, elements, mesh, id, "reinforcement", id, metadata);
 }
 function addDerivedStirrups(group, elements, item, scale, category) {
   const layouts = item.reinforcement || [];
@@ -74,12 +74,17 @@ function addDerivedStirrups(group, elements, item, scale, category) {
         center.clone().addScaledVector(u, halfW).addScaledVector(v, halfD),
         center.clone().addScaledVector(u, -halfW).addScaledVector(v, halfD)
       ];
-      for (let side = 0; side < 4; side++) addCylinderBetween(group, elements, corners[side], corners[(side + 1) % 4], diameter, `${item.id}-stirrup-${li}-${n}-${side}`);
+      for (let side = 0; side < 4; side++) addCylinderBetween(group, elements, corners[side], corners[(side + 1) % 4], diameter, `${item.id}-stirrup-${li}-${n}-${side}`, {
+        ownerId: item.id, ownerName: item.label || item.id, reinforcementType: layout.arrangement,
+        diameter: layout.barDiameter.value, spacing: layout.spacing.value, cover: layout.cover.value,
+        quantity: count, stirrupIndex: n + 1, provenance: layout.provenance || null, layoutIndex: li
+      });
     }
   }
 }
 function addReinforcement(group, elements, item, scale) {
-  (item.reinforcement || []).forEach((layout, i) => (layout.bars || []).forEach((bar, j) => addRod(group, elements, bar, scale, `${item.id}-rebar-${i}-${j}`)));
+  (item.reinforcement || []).forEach((layout, i) => (layout.bars || []).forEach((bar, j) =>
+    addRod(group, elements, bar, scale, `${item.id}-rebar-${i}-${j}`, item, layout, i)));
 }
 function addSlab(group, elements, slab, scale, levelElevation) {
   const y = (slab.elevation?.value ?? levelElevation) * scale;
