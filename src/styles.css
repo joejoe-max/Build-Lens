@@ -28,3 +28,8 @@
 .composer-footer>span{font-size:8px}
 .composer-input-row .send-button:disabled{opacity:.35}
 @media(max-width:760px){.composer{margin:0 9px 8px}.composer textarea{font-size:12px}}
+
+/* Visible previews for image and PDF attachments */
+.pending-chip{min-width:0;max-width:100%;overflow:hidden}
+.pending-thumb{width:27px;height:27px;object-fit:cover;flex:0 0 27px;border:1px solid #56636b;border-radius:3px}
+.pending-chip-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
