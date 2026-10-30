@@ -121,6 +121,25 @@ function createFromSpec(scene, model) {
     const elevation=slab.levelId && levels.has(slab.levelId) ? levels.get(slab.levelId) : (levels.values().next().value ?? 0);
     addSlab(group,elements,slab,s,elevation); addReinforcement(group,elements,slab,s);
   }
+  for (const stair of model.structure.stairs || []) {
+    const start = vec(stair.start, s), end = vec(stair.end, s);
+    const run = new THREE.Vector3(end.x - start.x, 0, end.z - start.z);
+    const runLength = run.length(), rise = end.y - start.y;
+    if (runLength <= 0 || rise <= 0 || !Number.isInteger(stair.steps) || stair.steps < 1) continue;
+    const direction = run.normalize();
+    const widthAxis = new THREE.Vector3(-direction.z, 0, direction.x);
+    const tread = runLength / stair.steps;
+    for (let step = 0; step < stair.steps; step++) {
+      const top = rise * (step + 1) / stair.steps;
+      const center = start.clone().addScaledVector(direction, (step + 0.5) * tread);
+      center.y += top / 2;
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(stair.width.value * s, top, tread), MATERIALS.concrete);
+      mesh.position.copy(center);
+      mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), direction);
+      addMesh(group, elements, mesh, `${stair.id}-step-${step + 1}`, "stairs", stair.label || stair.id);
+    }
+    addReinforcement(group, elements, stair, s);
+  }
   for (const w of model.structure.walls || []) {
     const a=vec(w.start,s), b=vec(w.end,s), d=b.clone().sub(a), length=d.length(); if(!length) continue;
     const h=w.height.value*s, thickness=w.thickness.value*s, direction=d.clone().normalize();
