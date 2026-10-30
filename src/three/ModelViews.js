@@ -7,18 +7,16 @@ export const MODEL_VIEWS = [
 
 export function isElementVisible(category, view) {
   if (view === "building") return true;
-  if (category === "foundation") return view === "foundation";
-  if (category === "ground") return view === "building" || view === "structure";
-  if (category === "rebar") return view === "rebar";
-  if (view === "structure") return ["structure", "column", "beam", "slab"].includes(category);
-  if (view === "foundation") return ["column"].includes(category);
-  if (view === "rebar") return ["slab", "beam"].includes(category);
+  if (category === "grids") return view !== "foundation";
+  if (view === "structure") return ["columns", "beams", "slabs", "walls"].includes(category);
+  if (view === "foundation") return ["foundations", "columns"].includes(category);
+  if (view === "rebar") return category === "reinforcement";
   return false;
 }
 
 export const VIEW_DESCRIPTIONS = {
-  building: "Illustrative sample · not to scale",
-  structure: "Structural frame · illustrative only",
-  foundation: "Foundation view · illustrative only",
-  rebar: "Reinforcement view · illustrative only"
+  building: "Project building model",
+  structure: "Structural frame and slabs",
+  foundation: "Foundations and supporting columns",
+  rebar: "Explicitly modelled reinforcement bars"
 };
