@@ -25,7 +25,8 @@ export async function askBuildLens({ message, history = [], attachments = [], cu
 
   onActions({
     actions: Array.isArray(payload.actions) ? payload.actions : [],
-    model: payload.model ?? currentModel
+    model: payload.model ?? currentModel,
+    findings: Array.isArray(payload.findings) ? payload.findings : []
   });
   onDelta(payload.answer);
   return payload.answer;
