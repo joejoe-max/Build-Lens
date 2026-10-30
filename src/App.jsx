@@ -234,7 +234,18 @@ export default function App() {
         attachments: requestAttachments,
         currentModel: modelSpec,
         onActions: result => {
-          if (result.model) setModelSpec(result.model);
+          if (result.model) {
+            setModelSpec(result.model);
+            // Keep an immutable model snapshot on the assistant message that
+            // produced it, so each chat response can display its own 3D scene.
+            const next = [...messagesRef.current];
+            const last = next.length - 1;
+            if (last >= 0 && next[last].role === "assistant") {
+              next[last] = { ...next[last], modelSpec: result.model, modelActions: result.actions || [] };
+              messagesRef.current = next;
+              setMessages(next);
+            }
+          }
           if (result.actions?.length) setModelActions(current => [...current, ...result.actions].slice(-100));
           if (result.findings?.length) setDrawingFindings(current => [...current, ...result.findings].slice(-500));
         },
