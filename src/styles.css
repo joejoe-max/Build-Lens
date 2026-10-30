@@ -15,3 +15,16 @@
 .markdown-body{font-size:11px;line-height:1.7;color:#c2cbd0;overflow-wrap:anywhere}.markdown-body>*:first-child{margin-top:0}.markdown-body>*:last-child{margin-bottom:0}.markdown-body p{margin:0 0 9px;white-space:normal}.markdown-body h1,.markdown-body h2,.markdown-body h3,.markdown-body h4{color:#edf1f3;line-height:1.35;margin:13px 0 7px;font-weight:650}.markdown-body h1{font-size:16px}.markdown-body h2{font-size:14px}.markdown-body h3,.markdown-body h4{font-size:12px}.markdown-body ul,.markdown-body ol{padding-left:19px;margin:7px 0 10px}.markdown-body li{padding-left:2px;margin:3px 0}.markdown-body blockquote{margin:8px 0;padding:5px 10px;border-left:2px solid #82949e;color:#aebbc2;background:#20262a}.markdown-body code{font-family:var(--mono);font-size:.92em;background:#252b30;padding:2px 4px;border-radius:3px}.markdown-body pre{max-width:100%;overflow:auto;padding:10px;background:#101316;border:1px solid #333b40;border-radius:4px}.markdown-body pre code{padding:0;background:transparent}.markdown-body table{display:block;max-width:100%;overflow-x:auto;border-collapse:collapse;font-size:10px}.markdown-body th,.markdown-body td{padding:6px 8px;border:1px solid #3b444a;text-align:left}.markdown-body th{background:#252c31;color:#e1e7ea}.markdown-body a{color:#b7d0de;text-decoration:underline}.markdown-body hr{border:0;border-top:1px solid #3a4248;margin:12px 0}
 .welcome-ask-button{position:absolute;z-index:5;top:78px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:12px;min-width:270px;padding:12px 15px;border:1px solid #657680;background:#20272c;color:#e6ecef;text-align:left;box-shadow:0 8px 26px #0005}.welcome-ask-button:hover{background:#293238;border-color:#9aabb4}.welcome-ask-icon{display:grid;place-items:center;width:32px;height:32px;background:#354149;border:1px solid #56636b}.welcome-ask-button>span:nth-child(2){display:flex;flex-direction:column;gap:3px;flex:1}.welcome-ask-button strong{font-size:11px}.welcome-ask-button small{font-size:9px;color:#a6b3ba}.welcome-ask-button>svg{color:#b7c5cc}
 @media(max-width:760px){.welcome-ask-button{top:65px;min-width:0;width:calc(100% - 28px);max-width:420px;padding:10px 12px}.right-panel{z-index:20}}
+
+/* ChatGPT-style composer attachment control */
+.composer{padding:7px 8px 5px;border-radius:9px}
+.composer-input-row{display:flex;align-items:flex-end;gap:7px}
+.composer textarea{flex:1;min-width:0;min-height:42px;max-height:140px;resize:none;padding:9px 4px 7px}
+.composer textarea:disabled{opacity:.55;cursor:not-allowed}
+.composer-attach-button{height:34px;width:34px;flex:0 0 34px;display:grid;place-items:center;border:1px solid #414b52;border-radius:50%;background:#252c31;color:#dce4e8;margin-bottom:3px}
+.composer-attach-button:hover:not(:disabled){background:#313b42;border-color:#788a94}
+.composer .send-button{height:34px;width:34px;flex:0 0 34px;border-radius:50%;margin-bottom:3px}
+.composer-footer{padding:3px 4px 1px 42px}
+.composer-footer>span{font-size:8px}
+.composer-input-row .send-button:disabled{opacity:.35}
+@media(max-width:760px){.composer{margin:0 9px 8px}.composer textarea{font-size:12px}}
