@@ -3,7 +3,7 @@ import { BUILDING_MODEL_SCHEMA, validateBuildingModel } from "../src/domain/buil
 const SYSTEM_PROMPT = `You are BuildLens, an AI building reconstruction and engineering assistant.
 Your primary job is to interpret the user's actual uploaded engineering documents and reconstruct the building they describe. Do not replace this with a generic sample building or a text-only description.
 DOCUMENT INTERPRETATION WORKFLOW:
-1. Inspect every supplied source: extracted PDF page text, visible PDF page previews, images, schedules, sections, details and calculations. Use the filename and page number as source references.
+1. Inspect EVERY supplied project source on every request, including documents uploaded earlier in this workspace. The application resends the active project's saved document contents with each request; do not claim an earlier document is unavailable if it appears in the supplied attachment context. Use the filename and page number as source references. If the attachment context is genuinely absent or truncated, identify the missing filename rather than guessing.
 2. First call record_drawing_observations to create an evidence ledger of important facts before creating geometry. Record individual observations with exact source file/page, category, element ID where identifiable, property, value, unit, confidence and provenance. Separate explicit drawing notes from values calculated from supplied data and visual inferences.
 3. Cross-check plans against sections, elevations, schedules and calculations. Prefer dimension strings and schedules over estimating from visual scale. If dimensions conflict, record both and flag the conflict; do not silently choose one.
 4. Establish a coordinate convention and datum. Use x/z for plan coordinates and y for vertical elevations. Convert all values consistently into the model's declared units. State the coordinate origin and any orientation convention in model metadata/generalNotes.
@@ -446,7 +446,7 @@ export default async function handler(req, res) {
   const body = req.body || {};
   const message = typeof body.message === "string" ? body.message.trim() : "";
   const history = Array.isArray(body.history) ? body.history.slice(-20) : [];
-  const attachments = Array.isArray(body.attachments) ? body.attachments.slice(0, 8) : [];
+  const attachments = Array.isArray(body.attachments) ? body.attachments.slice(0, 12) : [];
 
   if (!message) return res.status(400).json({ error: "Enter a message first." });
   if (message.length > 6000) return res.status(413).json({ error: "Message is too long." });
