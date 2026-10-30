@@ -80,3 +80,14 @@
  .viewport-inspection-tools .selection-row>span{flex:1 0 100%;white-space:normal;overflow-wrap:anywhere;line-height:1.4}
  .viewport-inspection-tools .selection-row .inspection-button{flex:1}
 }
+
+/* Inline, per-message 3D model previews */
+.chat-model-card{margin-top:14px;border:1px solid #343b40;border-radius:10px;overflow:hidden;background:#15181b}
+.chat-model-card-heading{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border-bottom:1px solid #343b40}
+.chat-model-card-heading strong{font-size:10px;letter-spacing:.12em;color:#d9bd83}
+.chat-model-card-heading span{font-size:11px;color:#aab2b8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chat-model-viewport{height:260px;min-height:220px;position:relative;background:#15181b}
+.chat-model-viewport .viewport-canvas{height:100%;min-height:220px;width:100%;position:relative}
+.chat-model-viewport .viewport-inspection-tools{display:none!important}
+.chat-model-card>p{margin:0;padding:8px 12px;color:#929da5;font-size:10px;line-height:1.5;border-top:1px solid #343b40}
+@media(max-width:760px){.chat-model-viewport{height:230px}}
