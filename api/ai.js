@@ -264,8 +264,8 @@ function executeTool(name, args, state) {
     const result = validateBuildingModel(proposedModel);
     if (!result.valid) return { ok: false, error: "The proposed building model failed validation.", validationErrors: result.errors.slice(0, 30) };
     state.model = proposedModel;
-    state.actions.push({ type: "model.replace", model: args.model, reason: name === "render_building_model" ? "Initial model generated from project information." : args.reason });
-    return { ok: true, modelId: args.model.id, elementCounts: Object.fromEntries(Object.entries(args.model.structure).map(([key, value]) => [key, Array.isArray(value) ? value.length : 0])), message: "The model passed structural data validation and is ready for the 3D renderer." };
+    state.actions.push({ type: "model.replace", model: proposedModel, reason: name === "render_building_model" ? "Initial model generated from project information." : args.reason });
+    return { ok: true, modelId: proposedModel.id, elementCounts: Object.fromEntries(Object.entries(proposedModel.structure).map(([key, value]) => [key, Array.isArray(value) ? value.length : 0])), message: "The model passed structural data validation and is ready for the 3D renderer." };
   }
 
   if (name === "set_model_visibility") {
