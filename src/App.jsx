@@ -7,7 +7,7 @@ import Viewport from "./components/Viewport.jsx";
 import ModelControls, { ModelViewTabs } from "./components/ModelControls.jsx";
 import EngineeringPanel from "./components/EngineeringPanel.jsx";
 import AssumptionPanel from "./components/AssumptionPanel.jsx";
-import { askBuildLens } from "./services/ai.js";\nimport { createEmptyBuildingModel } from "./domain/buildingModel.js";
+import { askBuildLens } from "./services/ai.js";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
@@ -70,7 +70,8 @@ export default function App() {
   const [view, setView] = useState("building");
   const [files, setFiles] = useState([]);
   const [pendingAttachments, setPendingAttachments] = useState([]);
-  const [projectAttachments, setProjectAttachments] = useState([]);\n  const [modelSpec, setModelSpec] = useState(null);\n  const [modelActions, setModelActions] = useState([]);
+  const [projectAttachments, setProjectAttachments] = useState([]);
+  const [modelSpec, setModelSpec] = useState(null);\n  const [modelActions, setModelActions] = useState([]);
   const messagesRef = useRef([]);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
@@ -91,7 +92,9 @@ export default function App() {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed.messages) && parsed.messages.length) { messagesRef.current = parsed.messages; setMessages(parsed.messages); }
         if (Array.isArray(parsed.files)) setFiles(parsed.files);
-        if (typeof parsed.projectName === "string") setProjectName(parsed.projectName);\n        if (parsed.modelSpec && typeof parsed.modelSpec === "object") setModelSpec(parsed.modelSpec);\n        if (Array.isArray(parsed.modelActions)) setModelActions(parsed.modelActions);
+        if (typeof parsed.projectName === "string") setProjectName(parsed.projectName);
+        if (parsed.modelSpec && typeof parsed.modelSpec === "object") setModelSpec(parsed.modelSpec);
+        if (Array.isArray(parsed.modelActions)) setModelActions(parsed.modelActions);
       }
     } catch { /* Ignore invalid local workspace data. */ }
   }, []);
