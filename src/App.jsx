@@ -18,7 +18,7 @@ async function readAttachment(file) {
   const extension = file.name.split(".").pop().toLowerCase();
   if (file.type.startsWith("image/") && ["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
     const bitmap = await createImageBitmap(file);
-    const scale = Math.min(1, 1600 / Math.max(bitmap.width, bitmap.height));
+    const scale = Math.min(1, 1200 / Math.max(bitmap.width, bitmap.height));
     const canvas = document.createElement("canvas");
     canvas.width = Math.max(1, Math.round(bitmap.width * scale));
     canvas.height = Math.max(1, Math.round(bitmap.height * scale));
@@ -39,15 +39,15 @@ async function readAttachment(file) {
       if (text) pages.push(`[Page ${pageNumber}]\\n${text}`);
       // Extract both selectable text and visual page previews so drawings,
       // schedules and scanned pages remain available to the vision model.
-      if (pageNumber <= 4) {
+      if (pageNumber <= 2) {
         const base = page.getViewport({ scale: 1 });
-        const viewport = page.getViewport({ scale: Math.min(1.5, 1400 / base.width) });
+        const viewport = page.getViewport({ scale: Math.min(1.25, 1100 / base.width) });
         const canvas = document.createElement("canvas");
         canvas.width = Math.max(1, Math.round(viewport.width));
         canvas.height = Math.max(1, Math.round(viewport.height));
         await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
-        const dataUrl = canvas.toDataURL("image/jpeg", 0.72);
-        if (dataUrl.length <= 1400000) pageImages.push({ pageNumber, dataUrl });
+        const dataUrl = canvas.toDataURL("image/jpeg", 0.62);
+        if (dataUrl.length <= 850000) pageImages.push({ pageNumber, dataUrl });
         canvas.width = 0; canvas.height = 0;
       }
     }
