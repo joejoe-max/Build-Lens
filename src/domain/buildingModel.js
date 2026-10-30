@@ -49,6 +49,13 @@ const dimension = {
   },
 };
 
+const signedMeasurement = {
+  type: "object",
+  additionalProperties: false,
+  required: ["value", "provenance"],
+  properties: { value: { type: "number" }, provenance },
+};
+
 const reinforcement = {
   type: "object",
   additionalProperties: false,
@@ -145,7 +152,7 @@ const structuralSchema = {
           ...memberBase,
           type: { type: "string", enum: ["isolated", "strip", "combined", "raft", "pile_cap", "pile", "other"] },
           center: point3, width: dimension, length: dimension, depth: dimension,
-          topElevation: dimension,
+          topElevation: signedMeasurement,
           pileCount: { type: "integer", minimum: 1 },
         },
       },
@@ -185,7 +192,7 @@ export const BUILDING_MODEL_SCHEMA = {
         required: ["id", "name", "elevation", "provenance"],
         properties: {
           id: { type: "string", minLength: 1 }, name: { type: "string" },
-          elevation: dimension, usage: { type: "string" }, provenance,
+          elevation: signedMeasurement, usage: { type: "string" }, provenance,
         },
       },
     },
@@ -230,6 +237,14 @@ function checkProvenance(value, path, errors) {
   }
 }
 
+function checkSignedMeasurement(value, path, errors) {
+  if (!isObject(value) || !isFiniteNumber(value.value)) {
+    errors.push(`${path}.value must be a finite number`);
+    return;
+  }
+  checkProvenance(value.provenance, `${path}.provenance`, errors);
+}
+
 function checkDimension(value, path, errors) {
   if (!isObject(value) || !isFiniteNumber(value.value) || value.value <= 0) {
     errors.push(`${path}.value must be a positive finite number`);
@@ -257,7 +272,7 @@ export function validateBuildingModel(model) {
     const path = `levels[${i}]`;
     if (!isObject(level) || !level.id || !level.name) errors.push(`${path} requires id and name`);
     else {
-      checkDimension(level.elevation, `${path}.elevation`, errors);
+      checkSignedMeasurement(level.elevation, `${path}.elevation`, errors);
       checkProvenance(level.provenance, `${path}.provenance`, errors);
     }
   });
@@ -303,7 +318,7 @@ export function validateBuildingModel(model) {
           if (!Array.isArray(item.outline) || item.outline.length < 3) errors.push(`${path}.outline needs at least three plan points`);
           else item.outline.forEach((point, j) => checkPoint(point, ["x", "z"], `${path}.outline[${j}]`, errors));
           checkDimension(item.thickness, `${path}.thickness`, errors);
-          if (item.elevation) checkDimension(item.elevation, `${path}.elevation`, errors);
+          if (item.elevation) checkSignedMeasurement(item.elevation, `${path}.elevation`, errors);
         } else if (category === "walls") {
           checkPoint(item.start, ["x", "y", "z"], `${path}.start`, errors);
           checkPoint(item.end, ["x", "y", "z"], `${path}.end`, errors);
@@ -345,7 +360,7 @@ export function createEmptyBuildingModel({ id = "building-1", name = "Untitled b
     levels: [{
       id: "level-0",
       name: "Ground level",
-      elevation: { value: 0.001, provenance: { status: "assumed", note: "Placeholder only; replace with the drawing datum." } },
+      elevation: { value: 0, provenance: { status: "assumed", note: "Placeholder only; replace with the drawing datum." } },
       provenance: { status: "assumed", note: "Placeholder level so a new project has a valid starting structure." },
     }],
     grids: [],
