@@ -65,6 +65,7 @@ export default function Viewport({ view, showGrid = true, modelSpec = null, mode
 
     let modelGroup = null;
     let modelElements = [];
+    let connectivityBadge = null;
     const visibility = new Map();
     const applyVisibility = () => {
       const latest = new Map();
@@ -118,6 +119,18 @@ export default function Viewport({ view, showGrid = true, modelSpec = null, mode
       const created = createBuildingModel(scene, modelSpecRef.current);
       modelGroup = created.building;
       modelElements = created.elements;
+      if (connectivityBadge) connectivityBadge.remove();
+      connectivityBadge = null;
+      if (modelSpecRef.current && created.connectivity) {
+        const warnings = created.connectivity.warnings || [];
+        if (warnings.length) {
+          connectivityBadge = document.createElement("div");
+          connectivityBadge.setAttribute("role", "status");
+          connectivityBadge.style.cssText = "position:absolute;z-index:5;left:12px;bottom:12px;max-width:min(360px,calc(100% - 24px));padding:9px 11px;border:1px solid #66513a;border-radius:7px;background:rgba(28,25,22,.94);color:#e5c79e;font:11px/1.5 system-ui,sans-serif;pointer-events:none";
+          connectivityBadge.textContent = warnings.length + " structural connectivity item(s) need review. Check beam endpoints and column foundations.";
+          host.appendChild(connectivityBadge);
+        }
+      }
       if (modelSpecRef.current) fitCamera(modelGroup);
       else { controls.target.set(0, 3, 0); camera.position.set(11, 10, 13); controls.update(); }
       applyVisibility();
@@ -156,6 +169,7 @@ export default function Viewport({ view, showGrid = true, modelSpec = null, mode
       host.removeEventListener("buildlens-model-change", onModelChange);
       delete host.__resetBuildLensCamera;
       sceneState.current = null; controls.dispose(); disposeGroup(modelGroup);
+      if (connectivityBadge) connectivityBadge.remove();
       scene.traverse(object => {
         if (object.geometry) object.geometry.dispose();
         if (object.material) (Array.isArray(object.material) ? object.material : [object.material]).forEach(material => material.dispose());
