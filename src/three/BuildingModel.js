@@ -6,7 +6,6 @@ export function createBuildingModel(scene) {
   scene.add(building);
   const materials = {
     concrete: new THREE.MeshStandardMaterial({ color: "#a9b0b5", roughness: 0.82, metalness: 0.04 }),
-    // Opaque slabs prevent overlapping surfaces and colours showing through during rotation.
     slab: new THREE.MeshStandardMaterial({ color: "#737d85", roughness: 0.9, metalness: 0, transparent: false, opacity: 1, depthWrite: true }),
     beam: new THREE.MeshStandardMaterial({ color: "#d2d7db", roughness: 0.7 }),
     rebar: new THREE.MeshStandardMaterial({ color: "#c18b58", metalness: 0.62, roughness: 0.38 }),
@@ -20,41 +19,55 @@ export function createBuildingModel(scene) {
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     mesh.userData = { name, category };
-    building.add(mesh);
-    elements.push(mesh);
-    return mesh;
+    building.add(mesh); elements.push(mesh); return mesh;
+  };
+  const addRod = (name, start, end, radius = 0.025) => {
+    const a = new THREE.Vector3(...start), b = new THREE.Vector3(...end);
+    const direction = new THREE.Vector3().subVectors(b, a);
+    const mesh = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, direction.length(), 8), materials.rebar);
+    mesh.position.copy(a).add(b).multiplyScalar(0.5);
+    mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction.normalize());
+    mesh.castShadow = true;
+    mesh.userData = { name, category: "rebar" };
+    building.add(mesh); elements.push(mesh); return mesh;
   };
 
   addBox("Ground plane", [16, 0.08, 13], [0, -0.18, 0], materials.ground, "ground");
-  const xs = [-3, 0, 3];
-  const zs = [-2.5, 0, 2.5];
-  const floors = [0.18, 3.18, 6.18];
+  const xs = [-3, 0, 3], zs = [-2.5, 0, 2.5], floors = [0.18, 3.18, 6.18];
   floors.forEach((y, floorIndex) => {
     addBox(`Floor slab ${floorIndex + 1}`, [6.7, 0.16, 5.7], [0, y, 0], materials.slab, "slab");
     if (floorIndex < floors.length - 1) {
-      // Fit each column segment between slab faces rather than through the slabs.
-      const floorSpacing = floors[floorIndex + 1] - y;
-      const columnHeight = floorSpacing - 0.16;
-      const columnCenterY = y + floorSpacing / 2;
+      const spacing = floors[floorIndex + 1] - y;
       xs.forEach((x, xi) => zs.forEach((z, zi) => {
-        addBox(`Column ${floorIndex + 1}-${xi + 1}${zi + 1}`, [0.24, columnHeight, 0.24], [x, columnCenterY, z], materials.concrete, "column");
+        addBox(`Column ${floorIndex + 1}-${xi + 1}${zi + 1}`, [0.24, spacing - 0.16, 0.24], [x, y + spacing / 2, z], materials.concrete, "column");
       }));
-      // Beam tops meet the underside of the next slab; opaque surfaces avoid colour bleed.
-      const beamCenterY = floors[floorIndex + 1] - 0.08 - 0.11;
-      zs.forEach((z, i) => addBox(`Beam X-${floorIndex + 1}-${i + 1}`, [6, 0.22, 0.22], [0, beamCenterY, z], materials.beam, "beam"));
-      xs.forEach((x, i) => addBox(`Beam Z-${floorIndex + 1}-${i + 1}`, [0.22, 0.22, 5], [x, beamCenterY, 0], materials.beam, "beam"));
+      const beamY = floors[floorIndex + 1] - 0.19;
+      zs.forEach((z, i) => addBox(`Beam X-${floorIndex + 1}-${i + 1}`, [6, 0.22, 0.22], [0, beamY, z], materials.beam, "beam"));
+      xs.forEach((x, i) => addBox(`Beam Z-${floorIndex + 1}-${i + 1}`, [0.22, 0.22, 5], [x, beamY, 0], materials.beam, "beam"));
     }
   });
   xs.forEach((x, xi) => zs.forEach((z, zi) => {
     addBox(`Illustrative footing ${xi + 1}-${zi + 1}`, [0.95, 0.35, 0.95], [x, -0.42, z], materials.foundation, "foundation");
   }));
-  for (let i = 0; i < 5; i++) {
-    const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 5.2, 8), materials.rebar);
-    bar.rotation.z = Math.PI / 2;
-    bar.position.set(-2.7 + i * 1.35, 0.34, 0);
-    bar.userData = { name: "Illustrative slab reinforcement", category: "rebar" };
-    building.add(bar);
-    elements.push(bar);
-  }
+
+  // Visible reinforcement demonstration: slab mesh, column longitudinal bars,
+  // and beam bars. These are illustrative only, not a reinforcement design.
+  floors.forEach((y, floorIndex) => {
+    const barY = y + 0.115;
+    for (let i = 0; i < 5; i++) {
+      const z = -2.2 + i * 1.1;
+      addRod(`Slab ${floorIndex + 1} bar X-${i + 1}`, [-3.0, barY, z], [3.0, barY, z], 0.018);
+    }
+    for (let i = 0; i < 6; i++) {
+      const x = -2.8 + i * 1.12;
+      addRod(`Slab ${floorIndex + 1} bar Z-${i + 1}`, [x, barY + 0.025, -2.5], [x, barY + 0.025, 2.5], 0.018);
+    }
+  });
+  xs.forEach((x, xi) => zs.forEach((z, zi) => {
+    const offsets = [-0.075, 0.075];
+    offsets.forEach((dx, n) => offsets.forEach((dz, m) => {
+      addRod(`Column reinforcement ${xi + 1}-${zi + 1} ${n + 1}${m + 1}`, [x + dx, 0.28, z + dz], [x + dx, 6.05, z + dz], 0.022);
+    }));
+  }));
   return { building, elements };
 }
