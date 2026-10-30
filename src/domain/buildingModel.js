@@ -337,7 +337,19 @@ export function validateBuildingModel(model) {
             else {
               for (const key of ["barDiameter", "spacing", "cover"]) if (layout[key]) checkDimension(layout[key], `${rp}.${key}`, errors);
               if (layout.quantity !== undefined && (!Number.isInteger(layout.quantity) || layout.quantity < 1)) errors.push(`${rp}.quantity must be a positive integer`);
-              if (layout.bars !== undefined && !Array.isArray(layout.bars)) errors.push(`${rp}.bars must be an array`);
+              if (layout.bars !== undefined) {
+                if (!Array.isArray(layout.bars)) errors.push(`${rp}.bars must be an array`);
+                else layout.bars.forEach((bar, k) => {
+                  const bp = `${rp}.bars[${k}]`;
+                  if (!isObject(bar) || typeof bar.id !== "string" || !bar.id.trim()) errors.push(`${bp}.id is required`);
+                  else {
+                    checkPoint(bar.start, ["x", "y", "z"], `${bp}.start`, errors);
+                    checkPoint(bar.end, ["x", "y", "z"], `${bp}.end`, errors);
+                    checkDimension(bar.diameter, `${bp}.diameter`, errors);
+                    checkProvenance(bar.provenance, `${bp}.provenance`, errors);
+                  }
+                });
+              }
               if (layout.provenance) checkProvenance(layout.provenance, `${rp}.provenance`, errors);
             }
           });
