@@ -401,7 +401,9 @@ export function validateBuildingModel(model) {
       for (const id of foundation.supportedElementIds || []) {
         const supported = byId.get(id);
         if (!supported) errors.push(`structure.foundations[${i}] references unknown supported element ${id}`);
-        else if (supported.base && Math.hypot(supported.base.x - foundation.center.x, supported.base.z - foundation.center.z) >
+        else if (supported.base && foundation.center && isObject(foundation.width) && isObject(foundation.length) &&
+          isFiniteNumber(foundation.width.value) && isFiniteNumber(foundation.length.value) &&
+          Math.hypot(supported.base.x - foundation.center.x, supported.base.z - foundation.center.z) >
           Math.max(foundation.width.value, foundation.length.value) / 2 + 0.01) {
           errors.push(`structure.foundations[${i}] is not beneath supported element ${id}`);
         }
