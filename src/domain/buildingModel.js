@@ -1,0 +1,354 @@
+/**
+ * BuildLens canonical building model contract.
+ *
+ * This is the shared boundary between document interpretation, validated
+ * engineering data, model-generation tools, and the Three.js renderer.
+ * All lengths are expressed in the model's declared unit.
+ */
+
+export const MODEL_SCHEMA_VERSION = "1.0.0";
+
+const provenance = {
+  type: "object",
+  additionalProperties: false,
+  required: ["status"],
+  properties: {
+    status: {
+      type: "string",
+      enum: ["specified", "calculated", "inferred", "assumed", "missing", "unverified"],
+    },
+    source: { type: "string" },
+    sourcePage: { type: "integer", minimum: 1 },
+    calculation: { type: "string" },
+    note: { type: "string" },
+    confidence: { type: "number", minimum: 0, maximum: 1 },
+  },
+};
+
+const point2 = {
+  type: "object",
+  additionalProperties: false,
+  required: ["x", "z"],
+  properties: { x: { type: "number" }, z: { type: "number" } },
+};
+
+const point3 = {
+  type: "object",
+  additionalProperties: false,
+  required: ["x", "y", "z"],
+  properties: { x: { type: "number" }, y: { type: "number" }, z: { type: "number" } },
+};
+
+const dimension = {
+  type: "object",
+  additionalProperties: false,
+  required: ["value", "provenance"],
+  properties: {
+    value: { type: "number", exclusiveMinimum: 0 },
+    provenance,
+  },
+};
+
+const reinforcement = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    arrangement: { type: "string", enum: ["longitudinal", "transverse", "top", "bottom", "both_faces", "closed_stirrups", "links", "mesh", "custom"] },
+    barDiameter: dimension,
+    quantity: { type: "integer", minimum: 1 },
+    spacing: dimension,
+    cover: dimension,
+    grade: { type: "string" },
+    bars: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["id", "start", "end", "diameter", "provenance"],
+        properties: {
+          id: { type: "string", minLength: 1 },
+          start: point3,
+          end: point3,
+          diameter: dimension,
+          provenance,
+        },
+      },
+    },
+    notes: { type: "string" },
+    provenance,
+  },
+};
+
+const memberBase = {
+  id: { type: "string", minLength: 1 },
+  label: { type: "string" },
+  material: { type: "string" },
+  levelId: { type: "string" },
+  provenance,
+  reinforcement: { type: "array", items: reinforcement },
+};
+
+const structuralSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    columns: {
+      type: "array",
+      items: {
+        type: "object", additionalProperties: false,
+        required: ["id", "base", "top", "width", "depth", "provenance"],
+        properties: {
+          ...memberBase, base: point3, top: point3, width: dimension, depth: dimension,
+        },
+      },
+    },
+    beams: {
+      type: "array",
+      items: {
+        type: "object", additionalProperties: false,
+        required: ["id", "start", "end", "width", "depth", "provenance"],
+        properties: {
+          ...memberBase, start: point3, end: point3, width: dimension, depth: dimension,
+        },
+      },
+    },
+    slabs: {
+      type: "array",
+      items: {
+        type: "object", additionalProperties: false,
+        required: ["id", "outline", "thickness", "provenance"],
+        properties: {
+          ...memberBase,
+          outline: { type: "array", minItems: 3, items: point2 },
+          elevation: dimension,
+          thickness: dimension,
+        },
+      },
+    },
+    walls: {
+      type: "array",
+      items: {
+        type: "object", additionalProperties: false,
+        required: ["id", "start", "end", "height", "thickness", "provenance"],
+        properties: {
+          ...memberBase, start: point3, end: point3, height: dimension, thickness: dimension,
+          openings: { type: "array", items: { type: "object", required: ["id", "width", "height"], properties: { id: { type: "string" }, width: dimension, height: dimension, sillHeight: dimension } } },
+        },
+      },
+    },
+    foundations: {
+      type: "array",
+      items: {
+        type: "object", additionalProperties: false,
+        required: ["id", "type", "center", "width", "length", "depth", "provenance"],
+        properties: {
+          ...memberBase,
+          type: { type: "string", enum: ["isolated", "strip", "combined", "raft", "pile_cap", "pile", "other"] },
+          center: point3, width: dimension, length: dimension, depth: dimension,
+          topElevation: dimension,
+          pileCount: { type: "integer", minimum: 1 },
+        },
+      },
+    },
+  },
+};
+
+export const BUILDING_MODEL_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["schemaVersion", "id", "name", "units", "levels", "grids", "structure", "metadata"],
+  properties: {
+    schemaVersion: { type: "string", const: MODEL_SCHEMA_VERSION },
+    id: { type: "string", minLength: 1 },
+    name: { type: "string", minLength: 1 },
+    units: { type: "string", enum: ["m", "mm", "cm", "ft"] },
+    metadata: {
+      type: "object", additionalProperties: false,
+      required: ["createdFrom"],
+      properties: {
+        createdFrom: { type: "array", items: { type: "string" } },
+        projectDescription: { type: "string" },
+        designCode: { type: "string" },
+        concreteGrade: { type: "string" },
+        reinforcementGrade: { type: "string" },
+        generalNotes: { type: "array", items: { type: "string" } },
+      },
+    },
+    overallDimensions: {
+      type: "object", additionalProperties: false,
+      properties: { x: dimension, y: dimension, z: dimension },
+    },
+    levels: {
+      type: "array",
+      items: {
+        type: "object", additionalProperties: false,
+        required: ["id", "name", "elevation", "provenance"],
+        properties: {
+          id: { type: "string", minLength: 1 }, name: { type: "string" },
+          elevation: dimension, usage: { type: "string" }, provenance,
+        },
+      },
+    },
+    grids: {
+      type: "array",
+      items: {
+        type: "object", additionalProperties: false,
+        required: ["id", "axis", "label", "position", "provenance"],
+        properties: {
+          id: { type: "string", minLength: 1 },
+          axis: { type: "string", enum: ["x", "z"] },
+          label: { type: "string" },
+          position: { type: "number" },
+          provenance,
+        },
+      },
+    },
+    structure: structuralSchema,
+  },
+};
+
+const isObject = value => value !== null && typeof value === "object" && !Array.isArray(value);
+const isFiniteNumber = value => typeof value === "number" && Number.isFinite(value);
+
+function checkPoint(point, dimensions, path, errors) {
+  if (!isObject(point)) {
+    errors.push(`${path} must be an object`);
+    return;
+  }
+  for (const key of dimensions) {
+    if (!isFiniteNumber(point[key])) errors.push(`${path}.${key} must be a finite number`);
+  }
+}
+
+function checkProvenance(value, path, errors) {
+  if (!isObject(value) || !["specified", "calculated", "inferred", "assumed", "missing", "unverified"].includes(value.status)) {
+    errors.push(`${path} must include a valid provenance.status`);
+    return;
+  }
+  if (value.confidence !== undefined && (!isFiniteNumber(value.confidence) || value.confidence < 0 || value.confidence > 1)) {
+    errors.push(`${path}.confidence must be between 0 and 1`);
+  }
+}
+
+function checkDimension(value, path, errors) {
+  if (!isObject(value) || !isFiniteNumber(value.value) || value.value <= 0) {
+    errors.push(`${path}.value must be a positive finite number`);
+    return;
+  }
+  checkProvenance(value.provenance, `${path}.provenance`, errors);
+}
+
+/**
+ * Runtime guard for data arriving from AI tool calls or persisted project data.
+ * It intentionally performs structural validation, not engineering design checks.
+ */
+export function validateBuildingModel(model) {
+  const errors = [];
+  if (!isObject(model)) return { valid: false, errors: ["Model must be an object"] };
+
+  for (const key of ["schemaVersion", "id", "name", "units"]) {
+    if (typeof model[key] !== "string" || !model[key]) errors.push(`${key} is required`);
+  }
+  if (model.schemaVersion !== MODEL_SCHEMA_VERSION) errors.push(`schemaVersion must be ${MODEL_SCHEMA_VERSION}`);
+  if (!["m", "mm", "cm", "ft"].includes(model.units)) errors.push("units must be m, mm, cm, or ft");
+
+  if (!Array.isArray(model.levels) || model.levels.length === 0) errors.push("At least one level is required");
+  else model.levels.forEach((level, i) => {
+    const path = `levels[${i}]`;
+    if (!isObject(level) || !level.id || !level.name) errors.push(`${path} requires id and name`);
+    else {
+      checkDimension(level.elevation, `${path}.elevation`, errors);
+      checkProvenance(level.provenance, `${path}.provenance`, errors);
+    }
+  });
+
+  if (!Array.isArray(model.grids)) errors.push("grids must be an array");
+  else model.grids.forEach((grid, i) => {
+    if (!isObject(grid) || !grid.id || !["x", "z"].includes(grid.axis) || typeof grid.label !== "string" || !isFiniteNumber(grid.position)) {
+      errors.push(`grids[${i}] has invalid id, axis, label, or position`);
+    } else checkProvenance(grid.provenance, `grids[${i}].provenance`, errors);
+  });
+
+  if (!isObject(model.metadata) || !Array.isArray(model.metadata.createdFrom)) errors.push("metadata.createdFrom must be an array");
+  if (!isObject(model.structure)) errors.push("structure must be an object");
+  else {
+    for (const category of ["columns", "beams", "slabs", "walls", "foundations"]) {
+      const items = model.structure[category] ?? [];
+      if (!Array.isArray(items)) {
+        errors.push(`structure.${category} must be an array`);
+        continue;
+      }
+      const ids = new Set();
+      items.forEach((item, i) => {
+        const path = `structure.${category}[${i}]`;
+        if (!isObject(item) || typeof item.id !== "string" || !item.id.trim()) {
+          errors.push(`${path}.id is required`);
+          return;
+        }
+        if (ids.has(item.id)) errors.push(`${path}.id duplicates another ${category} id`);
+        ids.add(item.id);
+        checkProvenance(item.provenance, `${path}.provenance`, errors);
+
+        if (category === "columns") {
+          checkPoint(item.base, ["x", "y", "z"], `${path}.base`, errors);
+          checkPoint(item.top, ["x", "y", "z"], `${path}.top`, errors);
+          checkDimension(item.width, `${path}.width`, errors);
+          checkDimension(item.depth, `${path}.depth`, errors);
+        } else if (category === "beams") {
+          checkPoint(item.start, ["x", "y", "z"], `${path}.start`, errors);
+          checkPoint(item.end, ["x", "y", "z"], `${path}.end`, errors);
+          checkDimension(item.width, `${path}.width`, errors);
+          checkDimension(item.depth, `${path}.depth`, errors);
+        } else if (category === "slabs") {
+          if (!Array.isArray(item.outline) || item.outline.length < 3) errors.push(`${path}.outline needs at least three plan points`);
+          else item.outline.forEach((point, j) => checkPoint(point, ["x", "z"], `${path}.outline[${j}]`, errors));
+          checkDimension(item.thickness, `${path}.thickness`, errors);
+          if (item.elevation) checkDimension(item.elevation, `${path}.elevation`, errors);
+        } else if (category === "walls") {
+          checkPoint(item.start, ["x", "y", "z"], `${path}.start`, errors);
+          checkPoint(item.end, ["x", "y", "z"], `${path}.end`, errors);
+          checkDimension(item.height, `${path}.height`, errors);
+          checkDimension(item.thickness, `${path}.thickness`, errors);
+        } else if (category === "foundations") {
+          checkPoint(item.center, ["x", "y", "z"], `${path}.center`, errors);
+          for (const key of ["width", "length", "depth"]) checkDimension(item[key], `${path}.${key}`, errors);
+        }
+
+        if (item.reinforcement !== undefined) {
+          if (!Array.isArray(item.reinforcement)) errors.push(`${path}.reinforcement must be an array`);
+          else item.reinforcement.forEach((layout, j) => {
+            const rp = `${path}.reinforcement[${j}]`;
+            if (!isObject(layout)) errors.push(`${rp} must be an object`);
+            else {
+              for (const key of ["barDiameter", "spacing", "cover"]) if (layout[key]) checkDimension(layout[key], `${rp}.${key}`, errors);
+              if (layout.quantity !== undefined && (!Number.isInteger(layout.quantity) || layout.quantity < 1)) errors.push(`${rp}.quantity must be a positive integer`);
+              if (layout.bars !== undefined && !Array.isArray(layout.bars)) errors.push(`${rp}.bars must be an array`);
+              if (layout.provenance) checkProvenance(layout.provenance, `${rp}.provenance`, errors);
+            }
+          });
+        }
+      });
+    }
+  }
+
+  return { valid: errors.length === 0, errors };
+}
+
+export function createEmptyBuildingModel({ id = "building-1", name = "Untitled building", units = "m" } = {}) {
+  return {
+    schemaVersion: MODEL_SCHEMA_VERSION,
+    id,
+    name,
+    units,
+    metadata: { createdFrom: [], generalNotes: [] },
+    overallDimensions: {},
+    levels: [{
+      id: "level-0",
+      name: "Ground level",
+      elevation: { value: 0.001, provenance: { status: "assumed", note: "Placeholder only; replace with the drawing datum." } },
+      provenance: { status: "assumed", note: "Placeholder level so a new project has a valid starting structure." },
+    }],
+    grids: [],
+    structure: { columns: [], beams: [], slabs: [], walls: [], foundations: [] },
+  };
+}
