@@ -24,8 +24,8 @@ async function readAttachment(file) {
     canvas.height = Math.max(1, Math.round(bitmap.height * scale));
     canvas.getContext("2d").drawImage(bitmap, 0, 0, canvas.width, canvas.height);
     bitmap.close?.();
-    const dataUrl = canvas.toDataURL("image/jpeg", 0.78);
-    if (dataUrl.length > 1400000) throw new Error(`${file.name} could not be compressed small enough. Try a smaller image.`);
+    const dataUrl = canvas.toDataURL("image/jpeg", 0.68);
+    if (dataUrl.length > 850000) throw new Error(`${file.name} could not be compressed small enough. Try a smaller image.`);
     return { id: crypto.randomUUID(), name: file.name, type: "image/jpeg", kind: "image", dataUrl, status: "Image ready to analyse" };
   }
   if (extension === "pdf" || file.type === "application/pdf") {
@@ -35,8 +35,8 @@ async function readAttachment(file) {
     for (let pageNumber = 1; pageNumber <= Math.min(pdf.numPages, 35); pageNumber++) {
       const page = await pdf.getPage(pageNumber);
       const content = await page.getTextContent();
-      const text = content.items.map(item => item.str || "").join(" ").replace(/\\s+/g, " ").trim();
-      if (text) pages.push(`[Page ${pageNumber}]\\n${text}`);
+      const text = content.items.map(item => item.str || "").join(" ").replace(/\s+/g, " ").trim();
+      if (text) pages.push(`[Page ${pageNumber}]\n${text}`);
       // Extract both selectable text and visual page previews so drawings,
       // schedules and scanned pages remain available to the vision model.
       if (pageNumber <= 2) {
@@ -51,7 +51,7 @@ async function readAttachment(file) {
         canvas.width = 0; canvas.height = 0;
       }
     }
-    const extracted = pages.join("\\n\\n");
+    const extracted = pages.join("\n\n");
     if (!extracted && !pageImages.length) throw new Error(`${file.name} could not be read. Try exporting it again as a standard PDF.`);
     return { id: crypto.randomUUID(), name: file.name, type: "application/pdf", kind: "text", content: extracted.slice(0, 45000), pageImages, status: extracted ? `Text + ${pageImages.length} page preview(s) ready` : `Scanned PDF · ${pageImages.length} page image(s) ready` };
   }
@@ -144,7 +144,7 @@ export default function App() {
     const history = messagesRef.current.filter(item => item && ["user", "assistant"].includes(item.role) && typeof item.content === "string" && item.content.trim()).slice(-20);
     const userText = message || `Please inspect the ${attachmentSnapshot.length} project file(s) and summarize what they contain.`;
     const attachmentNames = attachmentSnapshot.map(file => file.name);
-    const userEntry = { role: "user", content: attachmentNames.length ? `${userText}\\n\\nProject files available: ${attachmentNames.join(", ")}` : userText };
+    const userEntry = { role: "user", content: attachmentNames.length ? `${userText}\n\nProject files available: ${attachmentNames.join(", ")}` : userText };
     messagesRef.current = [...history, userEntry, { role: "assistant", content: "" }];
     setMessages(messagesRef.current);
     setInput("");
@@ -167,10 +167,10 @@ export default function App() {
       });
     } catch (error) {
       setMessages(current => {
-        const next = [...current];
+        const next = [...messagesRef.current];
         const last = next.length - 1;
         const failure = "I couldn't complete that request: " + error.message + ". Your uploaded files remain in the project list; you can try sending again.";
-        if (last >= 0 && next[last].role === "assistant") next[last] = { ...next[last], content: next[last].content ? next[last].content + "\\n\\n" + failure : failure };
+        if (last >= 0 && next[last].role === "assistant") next[last] = { ...next[last], content: next[last].content ? next[last].content + "\n\n" + failure : failure };
         else next.push({ role: "assistant", content: failure });
         return next;
       });
