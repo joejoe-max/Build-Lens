@@ -26,6 +26,10 @@ export default function Viewport({ view, showGrid = true, modelSpec = null, mode
   const [cutaway, setCutaway] = useState({ enabled: false, axis: "y", position: 0.5 });
   const [selectedElement, setSelectedElement] = useState(null);
   const [hiddenIds, setHiddenIds] = useState([]);
+  const [inspectionMode, setInspectionMode] = useState("all");
+  const [isolatedOwnerId, setIsolatedOwnerId] = useState(null);
+  const isolatedOwnerIdRef = useRef(null);
+  const inspectionModeRef = useRef("all");
 
   useEffect(() => { modelSpecRef.current = modelSpec; }, [modelSpec]);
   useEffect(() => { actionsRef.current = modelActions; }, [modelActions]);
@@ -34,6 +38,7 @@ export default function Viewport({ view, showGrid = true, modelSpec = null, mode
   useEffect(() => { cutawayRef.current = cutaway; hostRef.current?.dispatchEvent(new CustomEvent("buildlens-cutaway-change")); }, [cutaway]);
   useEffect(() => { hiddenIdsRef.current = new Set(hiddenIds); hostRef.current?.dispatchEvent(new CustomEvent("buildlens-model-change")); }, [hiddenIds]);
   useEffect(() => { measureModeRef.current = measureMode; measurePointsRef.current = []; }, [measureMode]);
+  useEffect(() => { isolatedOwnerIdRef.current = isolatedOwnerId; inspectionModeRef.current = inspectionMode; hostRef.current?.dispatchEvent(new CustomEvent("buildlens-model-change")); }, [isolatedOwnerId, inspectionMode]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -102,6 +107,7 @@ export default function Viewport({ view, showGrid = true, modelSpec = null, mode
             if (categoryAction.elementIds.includes(element.userData.id)) visible = categoryAction.visible;
           } else visible = categoryAction.visible;
         }
+        if (isolatedOwnerIdRef.current) { const ownerId = isolatedOwnerIdRef.current; const belongs = element.userData.id === ownerId || element.userData.ownerId === ownerId; visible = belongs && (inspectionModeRef.current === "rebar" ? category === "reinforcement" : true); }
         element.visible = visible && !hiddenIdsRef.current.has(element.userData.id);
       }
       grid.visible = showGridRef.current && viewRef.current !== "foundation";
@@ -203,7 +209,7 @@ export default function Viewport({ view, showGrid = true, modelSpec = null, mode
         const unitScale = ({ m: 1, mm: 0.001, cm: 0.01, ft: 0.3048 })[units] || 1;
         dimensions = [size.x, size.y, size.z].map(value => Number((value / unitScale).toFixed(3)));
       }
-      host.dispatchEvent(new CustomEvent("buildlens-select-element", { detail: data ? { id: data.id, name: data.name, category: data.category, dimensions, units: modelSpecRef.current?.units || "m" } : null }));
+      host.dispatchEvent(new CustomEvent("buildlens-select-element", { detail: data ? { id: data.id, name: data.name, category: data.category, dimensions, units: modelSpecRef.current?.units || "m", ownerId: data.ownerId || (data.category === "reinforcement" ? null : data.id), ownerName: data.ownerName || null, reinforcementType: data.reinforcementType || null, diameter: data.diameter ?? null, spacing: data.spacing ?? null, cover: data.cover ?? null, quantity: data.quantity ?? null, stirrupIndex: data.stirrupIndex ?? null, provenance: data.provenance || null } : null }));
     };
     const onSelection = event => setSelectedElement(event.detail || null);
     const enterModel = () => {
@@ -311,6 +317,9 @@ export default function Viewport({ view, showGrid = true, modelSpec = null, mode
     <div className="viewport-inspection-tools" onPointerDown={event => event.stopPropagation()}>
       <div className="inspection-row">
         <button type="button" className={measureMode ? "inspection-button active" : "inspection-button"} onClick={() => setMeasureMode(current => !current)}>{measureMode ? "Measuring: pick 2 points" : "Measure"}</button>
+        <button type="button" className={inspectionMode === "rebar" ? "inspection-button active" : "inspection-button"} disabled={!selectedElement || !(selectedElement.ownerId || selectedElement.id)} onClick={() => { setIsolatedOwnerId(selectedElement.ownerId || selectedElement.id); setInspectionMode(current => current === "rebar" ? "all" : "rebar"); }}>Rebar only</button>
+        <button type="button" className={inspectionMode === "member" ? "inspection-button active" : "inspection-button"} disabled={!selectedElement || !(selectedElement.ownerId || selectedElement.id)} onClick={() => { setIsolatedOwnerId(selectedElement.ownerId || selectedElement.id); setInspectionMode(current => current === "member" ? "all" : "member"); }}>Isolate member</button>
+        <button type="button" className="inspection-button" disabled={!isolatedOwnerId} onClick={() => { setIsolatedOwnerId(null); setInspectionMode("all"); }}>Show all</button>
         <button type="button" className="inspection-button" onClick={() => { hostRef.current?.__clearBuildLensMeasurements?.(); setMeasureMode(false); }}>Clear dimensions</button>
         <button type="button" className={cutaway.enabled ? "inspection-button active" : "inspection-button"} onClick={() => setCutaway(current => ({ ...current, enabled: !current.enabled }))}>{cutaway.enabled ? "Cutaway on" : "Cutaway"}</button>
         <select aria-label="Cutaway axis" value={cutaway.axis} onChange={event => setCutaway(current => ({ ...current, axis: event.target.value }))}><option value="y">Horizontal</option><option value="x">Vertical X</option><option value="z">Vertical Z</option></select>
@@ -320,7 +329,7 @@ export default function Viewport({ view, showGrid = true, modelSpec = null, mode
       </div>
       <div className="inspection-row measurement-status"><span>{measurement?.waitingForSecondPoint ? "First point selected — choose the second point." : measurement?.label ? "Measured distance: " + measurement.label : measureMode ? "Tap two points on the model to measure." : "Measurements use the model declared units."}</span></div>
       <div className="inspection-row inspection-slider-row"><span>Section position</span><input aria-label="Cutaway section position" type="range" min="0" max="100" value={Math.round(cutaway.position * 100)} onChange={event => setCutaway(current => ({ ...current, position: Number(event.target.value) / 100 }))} disabled={!cutaway.enabled}/></div>
-      <div className="inspection-row selection-row"><span>{selectedElement ? "Selected: " + selectedElement.name + " · " + selectedElement.category + (selectedElement.dimensions ? " · " + selectedElement.dimensions.join(" × ") + " " + selectedElement.units + " local extents" : "") : "Tap a structural element to inspect it"}</span><button type="button" className="inspection-button" disabled={!selectedElement} onClick={hideSelected}>Hide selected</button><button type="button" className="inspection-button" disabled={!hiddenIds.length} onClick={() => setHiddenIds([])}>Show hidden ({hiddenIds.length})</button></div>
+      <div className="inspection-row selection-row"><span>{selectedElement ? (selectedElement.category === "reinforcement" ? "Rebar: " + (selectedElement.ownerName || selectedElement.ownerId || "unassigned") + " · " + (selectedElement.reinforcementType || "bar") + (selectedElement.diameter ? " · Ø" + (selectedElement.diameter * 1000).toFixed(0) + " mm" : "") + (selectedElement.spacing ? " · @" + (selectedElement.spacing * 1000).toFixed(0) + " mm" : "") + (selectedElement.cover ? " · cover " + (selectedElement.cover * 1000).toFixed(0) + " mm" : "") + (selectedElement.stirrupIndex ? " · link " + selectedElement.stirrupIndex : "") : "Selected: " + selectedElement.name + " · " + selectedElement.category + (selectedElement.dimensions ? " · " + selectedElement.dimensions.join(" × ") + " " + selectedElement.units + " local extents" : "")) : "Tap a structural element to inspect it"}</span><button type="button" className="inspection-button" disabled={!selectedElement} onClick={hideSelected}>Hide selected</button><button type="button" className="inspection-button" disabled={!hiddenIds.length} onClick={() => setHiddenIds([])}>Show hidden ({hiddenIds.length})</button></div>
     </div>
   </div>;
 }
