@@ -6,8 +6,37 @@
     <meta name="theme-color" content="#111315" />
     <meta name="description" content="BuildLens — inspect building concepts in an interactive 3D engineering workspace." />
     <title>BuildLens — Engineering Workspace</title>
+    <style>
+      html,body{margin:0;min-width:320px;min-height:100%;background:#111315;color:#e8ebee;font-family:system-ui,sans-serif}
+      #boot-status{position:fixed;inset:0;z-index:99999;display:grid;place-content:center;gap:10px;padding:24px;background:#111315;color:#e8ebee;text-align:center}
+      #boot-status strong{font-size:18px}#boot-status span{font-size:13px;color:#9ba6ad}
+      #boot-status pre{max-width:min(680px,90vw);max-height:35vh;overflow:auto;white-space:pre-wrap;text-align:left;color:#f0c4bd;font-size:11px}
+    </style>
+    <script>
+      (function () {
+        function showBootError(message) {
+          var panel = document.getElementById("boot-status");
+          if (!panel) {
+            panel = document.createElement("div");
+            panel.id = "boot-status";
+            document.body.appendChild(panel);
+          }
+          panel.innerHTML = "<strong>BuildLens couldn't start</strong><span>The page loaded, but the app failed while starting. Error details:</span><pre></pre>";
+          panel.querySelector("pre").textContent = String(message || "Unknown startup error");
+        }
+        window.addEventListener("error", function (event) {
+          showBootError(event.message || (event.target && event.target.src) || "A script or resource failed to load.");
+        }, true);
+        window.addEventListener("unhandledrejection", function (event) {
+          var reason = event.reason;
+          showBootError(reason && (reason.stack || reason.message) || reason || "An unhandled promise rejection occurred.");
+        });
+        window.__buildLensShowBootError = showBootError;
+      })();
+    </script>
   </head>
   <body>
+    <div id="boot-status"><strong>BuildLens</strong><span>Starting workspace…</span></div>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>
