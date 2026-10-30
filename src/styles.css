@@ -59,3 +59,24 @@
 
 .measurement-status{min-height:18px;color:#d7c49b;font-size:9px}
 @media(max-width:760px){.measurement-status{font-size:8px;min-height:16px}}
+
+
+/* Compact viewport inspection controls; keep the model visible on phones. */
+.viewport-inspection-tools{max-width:min(760px,calc(100% - 24px));}
+.inspection-toggle{display:none;}
+.inspection-tools-content{display:flex;flex-direction:column;gap:6px;min-width:0}
+.inspection-slider-row input[type=range]{height:28px;touch-action:pan-x;cursor:ew-resize}
+@media(max-width:760px){
+ .viewport-inspection-tools{top:8px;left:auto;right:8px;transform:none;width:auto;max-width:calc(100% - 16px);padding:0;background:transparent;border:0;backdrop-filter:none;align-items:flex-end;gap:5px}
+ .inspection-toggle{display:block;min-height:34px;padding:7px 11px;border:1px solid #4a555d;border-radius:5px;background:rgba(20,24,27,.96);color:#e1e7eb;font:10px var(--mono);box-shadow:0 2px 10px #0006}
+ .inspection-tools-content{display:none;width:min(340px,calc(100vw - 24px));max-height:min(48dvh,390px);overflow-y:auto;overscroll-behavior:contain;padding:7px;background:rgba(20,24,27,.97);border:1px solid #39434a;border-radius:7px;box-shadow:0 5px 18px #0008}
+ .viewport-inspection-tools.tools-open .inspection-tools-content{display:flex}
+ .viewport-inspection-tools .inspection-row{flex-wrap:wrap}
+ .viewport-inspection-tools .inspection-button,.viewport-inspection-tools select{min-height:32px;padding:6px 8px;font-size:10px}
+ .viewport-inspection-tools .inspection-slider-row{display:flex;flex-wrap:nowrap;align-items:center;gap:10px}
+ .viewport-inspection-tools .inspection-slider-row input[type=range]{flex:1;min-width:100px;height:34px;margin:0;accent-color:#d5c092}
+ .viewport-inspection-tools .measurement-status{font-size:10px;line-height:1.4;min-height:20px}
+ .viewport-inspection-tools .selection-row{display:flex;flex-wrap:wrap}
+ .viewport-inspection-tools .selection-row>span{flex:1 0 100%;white-space:normal;overflow-wrap:anywhere;line-height:1.4}
+ .viewport-inspection-tools .selection-row .inspection-button{flex:1}
+}
