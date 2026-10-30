@@ -140,7 +140,14 @@ export default function App() {
     try {
       await askBuildLens({ message: userText, history, attachments: attachmentSnapshot.map(({ name, type, kind, content, dataUrl }) => ({ name, type, kind, content, dataUrl })), onDelta: streamed => setMessages(current => { const next = [...current]; const last = next.length - 1; if (last >= 0 && next[last].role === "assistant") next[last] = { ...next[last], content: streamed }; return next; }) });
     } catch (error) {
-      setMessages(current => [...current, { role: "assistant", content: `I couldn't complete that request: ${error.message}. Your uploaded files remain in the project list; you can try sending again.` }]);
+      setMessages(current => {
+        const next = [...current];
+        const last = next.length - 1;
+        const failure = "I couldn't complete that request: " + error.message + ". Your uploaded files remain in the project list; you can try sending again.";
+        if (last >= 0 && next[last].role === "assistant" && !next[last].content) next[last] = { ...next[last], content: failure };
+        else next.push({ role: "assistant", content: failure });
+        return next;
+      });
     } finally { setBusy(false); }
   };
 
