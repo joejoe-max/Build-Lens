@@ -17,13 +17,16 @@ const textExtensions = ["txt", "md", "csv", "json", "xml"];
 async function readAttachment(file) {
   const extension = file.name.split(".").pop().toLowerCase();
   if (file.type.startsWith("image/") && ["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
-    const dataUrl = await new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result);
-      reader.onerror = () => reject(new Error("Could not read image."));
-      reader.readAsDataURL(file);
-    });
-    return { id: crypto.randomUUID(), name: file.name, type: file.type, kind: "image", dataUrl, status: "Ready to analyse" };
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, 1600 / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+    canvas.getContext("2d").drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close?.();
+    const dataUrl = canvas.toDataURL("image/jpeg", 0.78);
+    if (dataUrl.length > 1400000) throw new Error(`${file.name} could not be compressed small enough. Try a smaller image.`);
+    return { id: crypto.randomUUID(), name: file.name, type: "image/jpeg", kind: "image", dataUrl, status: "Image ready to analyse" };
   }
   if (extension === "pdf" || file.type === "application/pdf") {
     const pdf = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
