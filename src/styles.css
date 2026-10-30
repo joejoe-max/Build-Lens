@@ -33,3 +33,12 @@
 .pending-chip{min-width:0;max-width:100%;overflow:hidden}
 .pending-thumb{width:27px;height:27px;object-fit:cover;flex:0 0 27px;border:1px solid #56636b;border-radius:3px}
 .pending-chip-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+
+
+.evidence-summary{display:flex;align-items:center;gap:8px;margin:18px 0 10px;color:#b6c0c7;font-size:12px}
+.evidence-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 12px;padding:10px 0;border-top:1px solid #2c3238;font-size:11px}
+.evidence-row>div{display:flex;flex-direction:column;gap:3px;min-width:0}
+.evidence-row strong{color:#e0e5e8;font-weight:600;overflow-wrap:anywhere}
+.evidence-row>div span,.evidence-row small{color:#89949c;font-size:10px}
+.evidence-value{color:#d6dce0;text-align:right;overflow-wrap:anywhere}
+.evidence-row small{grid-column:1/-1}
