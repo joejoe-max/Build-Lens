@@ -1,3 +1,4 @@
+import React from "react";
 import { Check, FileUp, MessageSquare, Send, ShieldAlert, Sparkles, X } from "lucide-react";
 
 export default function EngineeringPanel({
