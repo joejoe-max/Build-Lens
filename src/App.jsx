@@ -71,7 +71,8 @@ export default function App() {
   const [files, setFiles] = useState([]);
   const [pendingAttachments, setPendingAttachments] = useState([]);
   const [projectAttachments, setProjectAttachments] = useState([]);
-  const [modelSpec, setModelSpec] = useState(null);\n  const [modelActions, setModelActions] = useState([]);
+  const [modelSpec, setModelSpec] = useState(null);
+  const [modelActions, setModelActions] = useState([]);
   const messagesRef = useRef([]);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
