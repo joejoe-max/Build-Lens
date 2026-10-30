@@ -10,7 +10,6 @@ import { askBuildLens } from "./services/ai.js";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/legacy/build/pdf.worker.min.mjs", import.meta.url).toString();
 
-const starterMessages = [{ role: "assistant", content: "Hi! I can help with building design questions, engineering concepts, and reviewing your project files. Ask me anything, or attach a drawing, photo or document to get started." }];
 const MAX_FILE_SIZE = 12 * 1024 * 1024;
 const textExtensions = ["txt", "md", "csv", "json", "xml"];
 
@@ -56,7 +55,7 @@ export default function App() {
   const [view, setView] = useState("building");
   const [files, setFiles] = useState([]);
   const [pendingAttachments, setPendingAttachments] = useState([]);
-  const [messages, setMessages] = useState(starterMessages);
+  const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [mobilePanel, setMobilePanel] = useState(false);
@@ -115,11 +114,11 @@ export default function App() {
 
   const startNewChat = () => {
     if (busy) return;
-    setMessages(starterMessages);
+    setMessages([]);
     setHasStartedChat(true);
     setInput("");
     setPendingAttachments([]);
-    setNotice("Started a new chat. Your project files remain in the workspace.");
+    setNotice("");
   };
 
   const sendMessage = async event => {
@@ -159,7 +158,7 @@ export default function App() {
 
   const clearWorkspace = () => {
     if (!window.confirm("Clear this workspace's chat and uploaded-file list? This cannot be undone.")) return;
-    setMessages(starterMessages); setFiles([]); setPendingAttachments([]); setNotice("Workspace cleared.");
+    setMessages([]); setFiles([]); setPendingAttachments([]); setNotice("Workspace cleared.");
   };
 
   return <main className="app-shell">
