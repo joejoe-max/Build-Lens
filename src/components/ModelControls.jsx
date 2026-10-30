@@ -1,3 +1,4 @@
+import React from "react";
 import { Box, Building2, Layers3, RotateCcw, SlidersHorizontal } from "lucide-react";
 
 const views = [
