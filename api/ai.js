@@ -9,34 +9,29 @@ Use Markdown where it improves readability. Keep answers practical and proportio
 
 export const config = { maxDuration: 60 };
 
-function contentText(value) {
+function getText(value) {
   if (typeof value === "string") return value;
   if (Array.isArray(value)) return value.map(part => part?.text || "").join("");
   return "";
 }
 
-function emitPacket(packet, send, state) {
-  const choice = packet?.choices?.[0];
-  const delta = contentText(choice?.delta?.content);
-  const complete = !state.sentAny ? contentText(choice?.message?.content) : "";
-  const text = delta || complete;
-  if (text) {
-    send("delta", { text });
-    state.sentAny = true;
-  }
+function extractAnswer(payload) {
+  return getText(payload?.choices?.[0]?.message?.content)
+    || getText(payload?.output_text)
+    || getText(payload?.response);
 }
 
 export default async function handler(req, res) {
-  res.setHeader("Cache-Control", "no-cache, no-transform");
-  res.setHeader("X-Accel-Buffering", "no");
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
     return res.status(405).json({ error: "Method not allowed." });
   }
+
   const body = req.body || {};
   const message = typeof body.message === "string" ? body.message.trim() : "";
   const history = Array.isArray(body.history) ? body.history.slice(-10) : [];
   const attachments = Array.isArray(body.attachments) ? body.attachments.slice(0, 8) : [];
+
   if (!message) return res.status(400).json({ error: "Enter a message first." });
   if (message.length > 6000) return res.status(413).json({ error: "Message is too long." });
   if (history.some(item => !item || !["user", "assistant"].includes(item.role) || typeof item.content !== "string")) {
@@ -65,94 +60,53 @@ export default async function handler(req, res) {
     ...history.map(({ role, content }) => ({ role, content })),
     { role: "user", content: imageParts.length ? [{ type: "text", text: message + attachmentText }, ...imageParts] : message + attachmentText }
   ];
-  const send = (event, data) => {
-    if (!res.writableEnded) res.write("event: " + event + "\ndata: " + JSON.stringify(data) + "\n\n");
-  };
 
   try {
-    const requestModel = stream => fetch("https://api.meta.ai/v1/chat/completions", {
+    // Use a normal request/response on Vercel Functions. No SSE is opened or parsed
+    // between the browser and this serverless endpoint.
+    const upstream = await fetch("https://api.meta.ai/v1/chat/completions", {
       method: "POST",
-      headers: { Authorization: "Bearer " + apiKey, "Content-Type": "application/json", Accept: stream ? "text/event-stream" : "application/json" },
-      body: JSON.stringify({ model: "muse-spark-1.3", stream, messages, temperature: 0.2, max_tokens: 1800 })
+      headers: {
+        Authorization: "Bearer " + apiKey,
+        "Content-Type": "application/json",
+        Accept: "application/json"
+      },
+      body: JSON.stringify({
+        model: "muse-spark-1.3",
+        stream: false,
+        messages,
+        temperature: 0.2,
+        max_tokens: 1800
+      })
     });
 
-    let upstream = await requestModel(true);
+    const raw = await upstream.text();
+    let payload;
+    try { payload = raw ? JSON.parse(raw) : null; }
+    catch {
+      console.error("Meta API returned non-JSON content. HTTP:", upstream.status, "Content-Type:", upstream.headers.get("content-type"));
+      return res.status(502).json({ error: "Meta AI returned an unreadable response. Check the model endpoint and API configuration." });
+    }
+
     if (!upstream.ok) {
-      const detail = await upstream.text().catch(() => "");
-      console.error("Meta API streaming request failed:", upstream.status, detail.slice(0, 400));
-      // Some model gateways reject streaming outright. Retry as a normal completion.
-      upstream = await requestModel(false);
-      if (!upstream.ok) {
-        const fallbackDetail = await upstream.text().catch(() => "");
-        console.error("Meta API non-stream request failed:", upstream.status, fallbackDetail.slice(0, 400));
-        return res.status(upstream.status >= 500 ? 502 : upstream.status).json({
-          error: upstream.status === 401 || upstream.status === 403
-            ? "Meta API authentication failed. Check META_API_KEY in Vercel."
-            : "Meta AI request failed (HTTP " + upstream.status + "). Please try again."
-        });
-      }
+      const providerMessage = payload?.error?.message || payload?.message;
+      console.error("Meta API request failed:", upstream.status, String(providerMessage || "").slice(0, 400));
+      return res.status(upstream.status >= 500 ? 502 : upstream.status).json({
+        error: upstream.status === 401 || upstream.status === 403
+          ? "Meta API authentication failed. Check META_API_KEY in Vercel."
+          : "Meta AI request failed (HTTP " + upstream.status + "). " + (providerMessage || "Please try again.")
+      });
     }
 
-    res.status(200);
-    res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
-    res.setHeader("Connection", "keep-alive");
-    res.flushHeaders?.();
-    const state = { sentAny: false };
-    const type = upstream.headers.get("content-type") || "";
-
-    if (type.includes("application/json")) {
-      emitPacket(await upstream.json(), send, state);
-    } else if (upstream.body) {
-      const reader = upstream.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      try {
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split(/\r?\n/);
-          buffer = lines.pop() || "";
-          for (const raw of lines) {
-            const line = raw.trim();
-            if (!line.startsWith("data:")) continue;
-            const data = line.slice(5).trim();
-            if (!data || data === "[DONE]") continue;
-            try { emitPacket(JSON.parse(data), send, state); } catch { /* Ignore malformed stream frames. */ }
-          }
-        }
-        buffer += decoder.decode();
-        const last = buffer.trim();
-        if (last.startsWith("data:")) {
-          const data = last.slice(5).trim();
-          if (data && data !== "[DONE]") {
-            try { emitPacket(JSON.parse(data), send, state); } catch { /* Ignore incomplete final frame. */ }
-          }
-        }
-      } finally {
-        reader.releaseLock();
-      }
+    const answer = extractAnswer(payload);
+    if (!answer.trim()) {
+      console.error("Meta API response had no supported text field. Top-level keys:", Object.keys(payload || {}).join(","));
+      return res.status(502).json({ error: "Meta AI completed the request but returned no readable answer. Check the provider's response format." });
     }
 
-    if (!state.sentAny) {
-      // Retry without streaming when the provider accepted the request but returned no deltas.
-      const fallback = await requestModel(false);
-      if (fallback.ok) emitPacket(await fallback.json(), send, state);
-      else {
-        const detail = await fallback.text().catch(() => "");
-        console.error("Meta fallback response failed:", fallback.status, detail.slice(0, 400));
-      }
-    }
-    if (!state.sentAny) send("error", { message: "Meta AI returned an empty response. The model did not provide a readable answer. Please try again." });
-    send("done", {});
-    res.end();
+    return res.status(200).json({ answer });
   } catch (error) {
-    console.error("BuildLens Meta request error:", error?.name || "Error");
-    if (res.headersSent) {
-      send("error", { message: "The connection to Meta AI was interrupted. Please try again." });
-      res.end();
-    } else {
-      return res.status(502).json({ error: "Could not reach Meta AI. Check your connection and try again." });
-    }
+    console.error("BuildLens Meta request failed:", error?.name || "Error");
+    return res.status(502).json({ error: "Could not reach Meta AI. Check the connection and try again." });
   }
 }
