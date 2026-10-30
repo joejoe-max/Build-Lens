@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import React, { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { createBuildingModel } from "../three/BuildingModel.js";
 import { isElementVisible } from "../three/ModelViews.js";
