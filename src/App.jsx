@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { ChevronDown, FileUp, Layers3, MessageSquare, Plus, X } from "lucide-react";
+import { ChevronDown, FileUp, Layers3, MessageSquare, Plus, X, ArrowRight } from "lucide-react";
 import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
 import mammoth from "mammoth";
 import Viewport from "./components/Viewport.jsx";
@@ -10,7 +10,7 @@ import { askBuildLens } from "./services/ai.js";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/legacy/build/pdf.worker.min.mjs", import.meta.url).toString();
 
-const starterMessages = [{ role: "assistant", content: "Welcome to BuildLens. Ask a question or attach a drawing, photo, PDF or document. I'll help interpret the information provided and separate confirmed details from assumptions. The 3D building is currently an illustrative sample, not a reconstruction of your files." }];
+const starterMessages = [{ role: "assistant", content: "Hi! I can help with building design questions, engineering concepts, and reviewing your project files. Ask me anything, or attach a drawing, photo or document to get started." }];
 const MAX_FILE_SIZE = 12 * 1024 * 1024;
 const textExtensions = ["txt", "md", "csv", "json", "xml"];
 
@@ -60,6 +60,7 @@ export default function App() {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [mobilePanel, setMobilePanel] = useState(false);
+  const [hasStartedChat, setHasStartedChat] = useState(false);
   const [showGrid, setShowGrid] = useState(true);
   const [projectName, setProjectName] = useState("Untitled project");
   const [editingName, setEditingName] = useState(false);
@@ -115,6 +116,7 @@ export default function App() {
   const startNewChat = () => {
     if (busy) return;
     setMessages(starterMessages);
+    setHasStartedChat(true);
     setInput("");
     setPendingAttachments([]);
     setNotice("Started a new chat. Your project files remain in the workspace.");
@@ -132,10 +134,11 @@ export default function App() {
     setInput("");
     setPendingAttachments(current => current.filter(file => !attachmentSnapshot.some(item => item.id === file.id)));
     setBusy(true);
+    setHasStartedChat(true);
     setMobilePanel(true);
+    setMessages(current => [...current, { role: "assistant", content: "" }]);
     try {
-      const reply = await askBuildLens({ message: userText, history, attachments: attachmentSnapshot.map(({ name, type, kind, content, dataUrl }) => ({ name, type, kind, content, dataUrl })) });
-      setMessages(current => [...current, { role: "assistant", content: reply }]);
+      await askBuildLens({ message: userText, history, attachments: attachmentSnapshot.map(({ name, type, kind, content, dataUrl }) => ({ name, type, kind, content, dataUrl })), onDelta: streamed => setMessages(current => { const next = [...current]; const last = next.length - 1; if (last >= 0 && next[last].role === "assistant") next[last] = { ...next[last], content: streamed }; return next; }) });
     } catch (error) {
       setMessages(current => [...current, { role: "assistant", content: `I couldn't complete that request: ${error.message}. Your uploaded files remain in the project list; you can try sending again.` }]);
     } finally { setBusy(false); }
@@ -165,10 +168,12 @@ export default function App() {
         <span className="prototype-pill">PROTOTYPE</span>
       </div>
     </header>
+    {!hasStartedChat && <button className="welcome-ask-button" onClick={() => { setHasStartedChat(true); setMobilePanel(true); }}><span className="welcome-ask-icon"><MessageSquare size={17} /></span><span><strong>Ask BuildLens</strong><small>Start a conversation or upload your drawings</small></span><ArrowRight size={17} /></button>}
     <div className="workspace">
       <aside className="left-rail">
         <button className="rail-item active" title="Model workspace"><Layers3 size={18} /><span>Model</span></button>
         <button className="rail-item" title="Project documents" onClick={() => fileInputRef.current?.click()}><FileUp size={18} /><span>Files</span></button>
+        <button className="rail-item" title="Ask BuildLens" onClick={() => { setHasStartedChat(true); setMobilePanel(true); }}><MessageSquare size={18} /><span>Ask AI</span></button>
         <div className="rail-bottom"><span className="status-light" /><span>Workspace ready</span></div>
       </aside>
       <section className="model-column">
