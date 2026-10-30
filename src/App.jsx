@@ -67,11 +67,44 @@ async function readAttachment(file) {
   throw new Error(`${file.name}: this format is not supported yet. Use PDF, DOCX, TXT, CSV, JSON, PNG, JPG or WEBP.`);
 }
 
+const ATTACHMENT_DB = "buildlens-project-files";
+const ATTACHMENT_STORE = "attachments";
+function openAttachmentDB() {
+  return new Promise((resolve, reject) => {
+    if (!("indexedDB" in window)) return reject(new Error("IndexedDB unavailable"));
+    const request = indexedDB.open(ATTACHMENT_DB, 1);
+    request.onupgradeneeded = () => request.result.createObjectStore(ATTACHMENT_STORE);
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+async function readSavedAttachments() {
+  const db = await openAttachmentDB();
+  return new Promise((resolve, reject) => {
+    const request = db.transaction(ATTACHMENT_STORE, "readonly").objectStore(ATTACHMENT_STORE).get("active-project");
+    request.onsuccess = () => { resolve(Array.isArray(request.result) ? request.result : []); db.close(); };
+    request.onerror = () => { reject(request.error); db.close(); };
+  });
+}
+async function writeSavedAttachments(attachments) {
+  const db = await openAttachmentDB();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(ATTACHMENT_STORE, "readwrite");
+    transaction.objectStore(ATTACHMENT_STORE).put(attachments, "active-project");
+    transaction.oncomplete = () => { resolve(); db.close(); };
+    transaction.onerror = () => { reject(transaction.error); db.close(); };
+  });
+}
+async function clearSavedAttachments() {
+  try { await writeSavedAttachments([]); } catch { /* Local file cache is best-effort. */ }
+}
+
 export default function App() {
   const [view, setView] = useState("building");
   const [files, setFiles] = useState([]);
   const [pendingAttachments, setPendingAttachments] = useState([]);
   const [projectAttachments, setProjectAttachments] = useState([]);
+  const [attachmentsHydrated, setAttachmentsHydrated] = useState(false);
   const [modelSpec, setModelSpec] = useState(null);
   const [modelActions, setModelActions] = useState([]);
   const [drawingFindings, setDrawingFindings] = useState([]);
@@ -89,6 +122,10 @@ export default function App() {
   const fileInputRef = useRef(null);
 
   useEffect(() => {
+    readSavedAttachments().then(saved => {
+      if (saved.length) { setProjectAttachments(saved); setPendingAttachments([]); }
+      setAttachmentsHydrated(true);
+    }).catch(() => setAttachmentsHydrated(true));
     try {
       const saved = localStorage.getItem("buildlens-workspace-v2");
       if (saved) {
@@ -102,6 +139,10 @@ export default function App() {
       }
     } catch { /* Ignore invalid local workspace data. */ }
   }, []);
+
+  useEffect(() => {
+    if (attachmentsHydrated) writeSavedAttachments(projectAttachments).catch(() => setNotice("Browser storage could not save the uploaded file contents. Keep a copy of the original files."));
+  }, [projectAttachments, attachmentsHydrated]);
 
   useEffect(() => {
     try {
@@ -204,7 +245,7 @@ export default function App() {
 
   const clearWorkspace = () => {
     if (!window.confirm("Clear this workspace's chat and uploaded-file list? This cannot be undone.")) return;
-    messagesRef.current = []; setMessages([]); setFiles([]); setPendingAttachments([]); setProjectAttachments([]); setModelSpec(null); setModelActions([]); setDrawingFindings([]); setNotice("Workspace cleared.");
+    messagesRef.current = []; setMessages([]); setFiles([]); setPendingAttachments([]); setProjectAttachments([]); clearSavedAttachments(); setModelSpec(null); setModelActions([]); setDrawingFindings([]); setNotice("Workspace cleared.");
   };
 
   return <main className="app-shell">
