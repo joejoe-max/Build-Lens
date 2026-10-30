@@ -6,7 +6,7 @@ import { isElementVisible } from "../three/ModelViews.js";
 
 const ACTION_CATEGORY = {
   foundations: "foundations", columns: "columns", beams: "beams",
-  slabs: "slabs", walls: "walls", reinforcement: "reinforcement",
+  slabs: "slabs", walls: "walls", stairs: "stairs", reinforcement: "reinforcement",
   grids: "grids", all: "all"
 };
 
