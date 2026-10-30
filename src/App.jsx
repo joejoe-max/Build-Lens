@@ -73,6 +73,7 @@ export default function App() {
   const [projectAttachments, setProjectAttachments] = useState([]);
   const [modelSpec, setModelSpec] = useState(null);
   const [modelActions, setModelActions] = useState([]);
+  const [drawingFindings, setDrawingFindings] = useState([]);
   const messagesRef = useRef([]);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
@@ -96,15 +97,16 @@ export default function App() {
         if (typeof parsed.projectName === "string") setProjectName(parsed.projectName);
         if (parsed.modelSpec && typeof parsed.modelSpec === "object") setModelSpec(parsed.modelSpec);
         if (Array.isArray(parsed.modelActions)) setModelActions(parsed.modelActions);
+        if (Array.isArray(parsed.drawingFindings)) setDrawingFindings(parsed.drawingFindings);
       }
     } catch { /* Ignore invalid local workspace data. */ }
   }, []);
 
   useEffect(() => {
     try {
-      localStorage.setItem("buildlens-workspace-v2", JSON.stringify({ messages: messages.slice(-30), files, projectName, modelSpec, modelActions: modelActions.slice(-100) }));
+      localStorage.setItem("buildlens-workspace-v2", JSON.stringify({ messages: messages.slice(-30), files, projectName, modelSpec, modelActions: modelActions.slice(-100), drawingFindings: drawingFindings.slice(-500) }));
     } catch { setNotice("Workspace storage is full. Remove some files or export the workspace."); }
-  }, [messages, files, projectName, modelSpec, modelActions]);
+  }, [messages, files, projectName, modelSpec, modelActions, drawingFindings]);
 
   const addFiles = async event => {
     const selected = Array.from(event.target.files || []);
@@ -170,6 +172,7 @@ export default function App() {
         onActions: result => {
           if (result.model) setModelSpec(result.model);
           if (result.actions?.length) setModelActions(current => [...current, ...result.actions].slice(-100));
+          if (result.findings?.length) setDrawingFindings(current => [...current, ...result.findings].slice(-500));
         },
         onDelta: streamed => {
           const next = [...messagesRef.current];
@@ -193,14 +196,14 @@ export default function App() {
   };
 
   const exportWorkspace = () => {
-    const blob = new Blob([JSON.stringify({ app: "BuildLens", exportedAt: new Date().toISOString(), projectName, files, messages, modelSpec, modelActions }, null, 2)], { type: "application/json" });
+    const blob = new Blob([JSON.stringify({ app: "BuildLens", exportedAt: new Date().toISOString(), projectName, files, messages, modelSpec, modelActions, drawingFindings }, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a"); a.href = url; a.download = "buildlens-workspace.json"; a.click(); URL.revokeObjectURL(url);
   };
 
   const clearWorkspace = () => {
     if (!window.confirm("Clear this workspace's chat and uploaded-file list? This cannot be undone.")) return;
-    messagesRef.current = []; setMessages([]); setFiles([]); setPendingAttachments([]); setProjectAttachments([]); setModelSpec(null); setModelActions([]); setNotice("Workspace cleared.");
+    messagesRef.current = []; setMessages([]); setFiles([]); setPendingAttachments([]); setProjectAttachments([]); setModelSpec(null); setModelActions([]); setDrawingFindings([]); setNotice("Workspace cleared.");
   };
 
   return <main className="app-shell">
@@ -236,7 +239,7 @@ export default function App() {
           <div className="orientation-cube" aria-label="View orientation"><span className="cube-top">Y</span><span className="cube-front">Z</span><span className="cube-side">X</span></div>
         </div>
         <ModelViewTabs view={view} onViewChange={setView} />
-        <AssumptionPanel open={assumptionsOpen} onToggle={() => setAssumptionsOpen(value => !value)} />
+        <AssumptionPanel open={assumptionsOpen} onToggle={() => setAssumptionsOpen(value => !value)} modelSpec={modelSpec} findings={drawingFindings} />
       </section>
       <EngineeringPanel
         open={mobilePanel} onClose={() => setMobilePanel(false)}
