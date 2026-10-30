@@ -143,7 +143,7 @@ export default function App() {
         const next = [...current];
         const last = next.length - 1;
         const failure = "I couldn't complete that request: " + error.message + ". Your uploaded files remain in the project list; you can try sending again.";
-        if (last >= 0 && next[last].role === "assistant" && !next[last].content) next[last] = { ...next[last], content: failure };
+        if (last >= 0 && next[last].role === "assistant") next[last] = { ...next[last], content: next[last].content ? next[last].content + "\\n\\n" + failure : failure };
         else next.push({ role: "assistant", content: failure });
         return next;
       });
