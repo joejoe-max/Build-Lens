@@ -50,7 +50,7 @@ export default async function handler(req, res) {
     }
     if (Array.isArray(item.pageImages)) {
       for (const page of item.pageImages.slice(0, 2)) {
-        if (typeof page?.dataUrl === "string" && /^data:image\\/(jpeg|png|webp);base64,/.test(page.dataUrl) && page.dataUrl.length <= 850000) {
+        if (typeof page?.dataUrl === "string" && /^data:image\/(jpeg|png|webp);base64,/.test(page.dataUrl) && page.dataUrl.length <= 850000) {
           imageParts.push({ type: "image_url", image_url: { url: page.dataUrl, detail: "high" } });
         }
       }
