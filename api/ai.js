@@ -9,7 +9,7 @@ DOCUMENT INTERPRETATION WORKFLOW:
 4. Establish a coordinate convention and datum. Use x/z for plan coordinates and y for vertical elevations. Convert all values consistently into the model's declared units. State the coordinate origin and any orientation convention in model metadata/generalNotes.
 5. Build grids and floor levels first, then locate columns, beams, slabs, walls and foundations against those references. Use member schedules to populate cross-sections. Use foundation plans/sections for below-ground geometry. Model stair flights only when plan/section dimensions, total rise, horizontal run, width and step count or riser/tread schedule are available; populate the stairs category with documented geometry. Preserve slab openings as polygon outlines and wall openings with position-from-start, width, height and sill height when stated. Where the drawing explicitly identifies grid references, store column.gridRefs.x and column.gridRefs.z using the matching grid IDs and ensure the coordinates agree with those grid positions. Where beam supports are identifiable, store startSupportId and endSupportId referencing actual column/beam IDs and make beam endpoint coordinates meet those support points. Where a foundation supports one or more columns, store supportedElementIds. Do not invent a support relationship simply because two objects appear visually close; use coordinate matches only as diagnostic candidates, not as confirmed design connections.
 6. Read reinforcement callouts carefully: bar diameter, count, spacing, layers/faces, anchorage and cover. Preserve each documented reinforcement layout on its owning beam, column, slab, stair or foundation using arrangement, barDiameter, quantity, spacing, cover, grade, notes and provenance. Only create individual bars with explicit start/end coordinates when their positions can be derived from documented geometry and arrangement. For closed stirrups/links, the renderer may derive loops only when the member cross-section, member axis, bar diameter, spacing and cover are all documented; otherwise preserve metadata without drawing guessed bars. Never invent bar placement, hooks, anchorage or lap lengths.
-7. After recording observations, call render_building_model for a new model or update_building_model for an existing model. Use only supported values. Do not create a complete-looking model by filling unknown dimensions with guesses.
+7. After recording observations, call render_building_model for a new model or update_building_model for an existing model. IMPORTANT: the tool model argument is a JSON-encoded STRING, not a nested object. Serialize the complete model as valid JSON text in that string. Use only supported values. Do not create a complete-looking model by filling unknown dimensions with guesses.
 8. Explain what was successfully reconstructed, what remains missing, any drawing conflicts and which source pages support key dimensions.
 INTERPRETATION RULES:
 - Distinguish specified, calculated, inferred, assumed, missing and unverified values. Use source page and calculation notes for every engineering value.
@@ -85,7 +85,7 @@ const tools = [
         type: "object",
         additionalProperties: false,
         required: ["model"],
-        properties: { model: BUILDING_MODEL_SCHEMA }
+        properties: { model: { type: "string", minLength: 2, maxLength: 900000, description: "The complete building model as a JSON-encoded string. Follow the application building-model schema described in the system instructions." } }
       }
     }
   },
@@ -99,7 +99,7 @@ const tools = [
         additionalProperties: false,
         required: ["model", "reason"],
         properties: {
-          model: BUILDING_MODEL_SCHEMA,
+          model: { type: "string", minLength: 2, maxLength: 900000, description: "The complete revised building model as a JSON-encoded string. Follow the application building-model schema described in the system instructions." },
           reason: { type: "string", minLength: 1 }
         }
       }
@@ -256,9 +256,14 @@ function executeTool(name, args, state) {
   }
 
   if (name === "render_building_model" || name === "update_building_model") {
-    const result = validateBuildingModel(args.model);
+    let proposedModel = args.model;
+    if (typeof proposedModel === "string") {
+      try { proposedModel = JSON.parse(proposedModel); }
+      catch { return { ok: false, error: "The model argument was not valid JSON. Return the complete model as a JSON-encoded string." }; }
+    }
+    const result = validateBuildingModel(proposedModel);
     if (!result.valid) return { ok: false, error: "The proposed building model failed validation.", validationErrors: result.errors.slice(0, 30) };
-    state.model = args.model;
+    state.model = proposedModel;
     state.actions.push({ type: "model.replace", model: args.model, reason: name === "render_building_model" ? "Initial model generated from project information." : args.reason });
     return { ok: true, modelId: args.model.id, elementCounts: Object.fromEntries(Object.entries(args.model.structure).map(([key, value]) => [key, Array.isArray(value) ? value.length : 0])), message: "The model passed structural data validation and is ready for the 3D renderer." };
   }
