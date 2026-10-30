@@ -23,6 +23,8 @@ export default function Viewport({ view, showGrid = true, modelSpec = null, mode
   const measurePointsRef = useRef([]);
   const [measureMode, setMeasureMode] = useState(false);
   const [measurement, setMeasurement] = useState(null);
+  const [toolsOpen, setToolsOpen] = useState(() => typeof window !== "undefined" && window.matchMedia("(min-width: 761px)").matches);
+  const [inspectionNotice, setInspectionNotice] = useState("");
   const [cutaway, setCutaway] = useState({ enabled: false, axis: "y", position: 0.5 });
   const [selectedElement, setSelectedElement] = useState(null);
   const [hiddenIds, setHiddenIds] = useState([]);
@@ -209,7 +211,7 @@ export default function Viewport({ view, showGrid = true, modelSpec = null, mode
         const unitScale = ({ m: 1, mm: 0.001, cm: 0.01, ft: 0.3048 })[units] || 1;
         dimensions = [size.x, size.y, size.z].map(value => Number((value / unitScale).toFixed(3)));
       }
-      host.dispatchEvent(new CustomEvent("buildlens-select-element", { detail: data ? { id: data.id, name: data.name, category: data.category, dimensions, units: modelSpecRef.current?.units || "m", ownerId: data.ownerId || (data.category === "reinforcement" ? null : data.id), ownerName: data.ownerName || null, reinforcementType: data.reinforcementType || null, diameter: data.diameter ?? null, spacing: data.spacing ?? null, cover: data.cover ?? null, quantity: data.quantity ?? null, stirrupIndex: data.stirrupIndex ?? null, provenance: data.provenance || null } : null }));
+      host.dispatchEvent(new CustomEvent("buildlens-select-element", { detail: data ? { id: data.id, name: data.name, category: data.category, dimensions, units: modelSpecRef.current?.units || "m", ownerId: data.ownerId || (data.category === "reinforcement" ? null : data.id), reinforcementCount: data.category === "reinforcement" ? null : modelElements.filter(item => item.userData.category === "reinforcement" && item.userData.ownerId === data.id).length, ownerName: data.ownerName || null, reinforcementType: data.reinforcementType || null, diameter: data.diameter ?? null, spacing: data.spacing ?? null, cover: data.cover ?? null, quantity: data.quantity ?? null, stirrupIndex: data.stirrupIndex ?? null, provenance: data.provenance || null } : null }));
     };
     const onSelection = event => setSelectedElement(event.detail || null);
     const enterModel = () => {
@@ -314,11 +316,21 @@ export default function Viewport({ view, showGrid = true, modelSpec = null, mode
     setSelectedElement(null);
   };
   return <div className="viewport-canvas" ref={hostRef} aria-label="Interactive 3D building model">
-    <div className="viewport-inspection-tools" onPointerDown={event => event.stopPropagation()}>
+    <div className={"viewport-inspection-tools" + (toolsOpen ? " tools-open" : " tools-collapsed")} onPointerDown={event => event.stopPropagation()}>
+      <button type="button" className="inspection-toggle" aria-expanded={toolsOpen} onClick={() => setToolsOpen(value => !value)}>{toolsOpen ? "Hide inspection tools" : "Inspect model"}</button>
+      <div className="inspection-tools-content">
       <div className="inspection-row">
         <button type="button" className={measureMode ? "inspection-button active" : "inspection-button"} onClick={() => setMeasureMode(current => !current)}>{measureMode ? "Measuring: pick 2 points" : "Measure"}</button>
-        <button type="button" className={inspectionMode === "rebar" ? "inspection-button active" : "inspection-button"} disabled={!selectedElement || !(selectedElement.ownerId || selectedElement.id)} onClick={() => { setIsolatedOwnerId(selectedElement.ownerId || selectedElement.id); setInspectionMode(current => current === "rebar" ? "all" : "rebar"); }}>Rebar only</button>
-        <button type="button" className={inspectionMode === "member" ? "inspection-button active" : "inspection-button"} disabled={!selectedElement || !(selectedElement.ownerId || selectedElement.id)} onClick={() => { setIsolatedOwnerId(selectedElement.ownerId || selectedElement.id); setInspectionMode(current => current === "member" ? "all" : "member"); }}>Isolate member</button>
+        <button type="button" className={inspectionMode === "rebar" ? "inspection-button active" : "inspection-button"} disabled={!selectedElement || !(selectedElement.ownerId || selectedElement.id)} onClick={() => {
+          const ownerId = selectedElement.ownerId || selectedElement.id;
+          if (inspectionMode === "rebar" || inspectionMode === "member") { setIsolatedOwnerId(null); setInspectionMode("all"); setInspectionNotice(""); return; }
+          if (!selectedElement.reinforcementCount) { setInspectionNotice("No positioned reinforcement is available for this member yet. The concrete model has been kept visible."); return; }
+          setInspectionNotice(""); setIsolatedOwnerId(ownerId); setInspectionMode("rebar");
+        }}>Rebar only</button>
+        <button type="button" className={inspectionMode === "member" ? "inspection-button active" : "inspection-button"} disabled={!selectedElement || !(selectedElement.ownerId || selectedElement.id)} onClick={() => {
+          if (inspectionMode === "member") { setIsolatedOwnerId(null); setInspectionMode("all"); return; }
+          setIsolatedOwnerId(selectedElement.ownerId || selectedElement.id); setInspectionMode("member");
+        }}>Isolate member</button>
         <button type="button" className="inspection-button" disabled={!isolatedOwnerId} onClick={() => { setIsolatedOwnerId(null); setInspectionMode("all"); }}>Show all</button>
         <button type="button" className="inspection-button" onClick={() => { hostRef.current?.__clearBuildLensMeasurements?.(); setMeasureMode(false); }}>Clear dimensions</button>
         <button type="button" className={cutaway.enabled ? "inspection-button active" : "inspection-button"} onClick={() => setCutaway(current => ({ ...current, enabled: !current.enabled }))}>{cutaway.enabled ? "Cutaway on" : "Cutaway"}</button>
@@ -327,9 +339,10 @@ export default function Viewport({ view, showGrid = true, modelSpec = null, mode
         <button type="button" className="inspection-button" onClick={() => hostRef.current?.__resetBuildLensCamera?.()}>Fit</button>
         <button type="button" className="inspection-button" onClick={() => hostRef.current?.__enterBuildLensModel?.()}>Enter model</button>
       </div>
-      <div className="inspection-row measurement-status"><span>{measurement?.waitingForSecondPoint ? "First point selected — choose the second point." : measurement?.label ? "Measured distance: " + measurement.label : measureMode ? "Tap two points on the model to measure." : "Measurements use the model declared units."}</span></div>
+      <div className="inspection-row measurement-status"><span>{inspectionNotice || (measurement?.waitingForSecondPoint ? "First point selected — choose the second point." : measurement?.label ? "Measured distance: " + measurement.label : measureMode ? "Tap two points on the model to measure." : "Measurements use the model declared units.")}</span></div>
       <div className="inspection-row inspection-slider-row"><span>Section position</span><input aria-label="Cutaway section position" type="range" min="0" max="100" value={Math.round(cutaway.position * 100)} onChange={event => setCutaway(current => ({ ...current, position: Number(event.target.value) / 100 }))} disabled={!cutaway.enabled}/></div>
       <div className="inspection-row selection-row"><span>{selectedElement ? (selectedElement.category === "reinforcement" ? "Rebar: " + (selectedElement.ownerName || selectedElement.ownerId || "unassigned") + " · " + (selectedElement.reinforcementType || "bar") + (selectedElement.diameter ? " · Ø" + (selectedElement.diameter * ({ m: 1000, mm: 1, cm: 10, ft: 304.8 }[selectedElement.units] || 1000)).toFixed(0) + " mm" : "") + (selectedElement.spacing ? " · @" + (selectedElement.spacing * ({ m: 1000, mm: 1, cm: 10, ft: 304.8 }[selectedElement.units] || 1000)).toFixed(0) + " mm" : "") + (selectedElement.cover ? " · cover " + (selectedElement.cover * ({ m: 1000, mm: 1, cm: 10, ft: 304.8 }[selectedElement.units] || 1000)).toFixed(0) + " mm" : "") + (selectedElement.quantity ? " · count " + selectedElement.quantity : "") + (selectedElement.stirrupIndex ? " · link " + selectedElement.stirrupIndex : "") + (selectedElement.provenance?.status ? " · " + selectedElement.provenance.status : "") : "Selected: " + selectedElement.name + " · " + selectedElement.category + (selectedElement.dimensions ? " · " + selectedElement.dimensions.join(" × ") + " " + selectedElement.units + " local extents" : "")) : "Tap a structural element to inspect it"}</span><button type="button" className="inspection-button" disabled={!selectedElement} onClick={hideSelected}>Hide selected</button><button type="button" className="inspection-button" disabled={!hiddenIds.length} onClick={() => setHiddenIds([])}>Show hidden ({hiddenIds.length})</button></div>
+      </div>
     </div>
   </div>;
 }
