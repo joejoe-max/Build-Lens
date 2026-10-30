@@ -76,6 +76,55 @@ const tools = [
   {
     type: "function",
     function: {
+      name: "generate_reinforcement_layout",
+      description: "Add a reinforcement layout to an existing beam, column, slab, wall or foundation. Use only reinforcement details stated in the drawings or derived by an explicitly described calculation. Do not invent bar sizes, spacing, quantities or cover. Include provenance for every supplied value.",
+      parameters: {
+        type: "object",
+        additionalProperties: false,
+        required: ["elementId", "arrangement", "barDiameter", "provenance"],
+        properties: {
+          elementId: { type: "string", minLength: 1 },
+          arrangement: { type: "string", enum: ["longitudinal", "transverse", "top", "bottom", "both_faces", "closed_stirrups", "links", "mesh", "custom"] },
+          barDiameter: { type: "object", additionalProperties: false, required: ["value", "provenance"], properties: { value: { type: "number", exclusiveMinimum: 0 }, provenance } },
+          quantity: { type: "integer", minimum: 1 },
+          spacing: { type: "object", additionalProperties: false, required: ["value", "provenance"], properties: { value: { type: "number", exclusiveMinimum: 0 }, provenance } },
+          cover: { type: "object", additionalProperties: false, required: ["value", "provenance"], properties: { value: { type: "number", exclusiveMinimum: 0 }, provenance } },
+          grade: { type: "string" },
+          notes: { type: "string" },
+          provenance
+        }
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "update_element_dimensions",
+      description: "Update dimensions on one existing structural element when the user supplies corrected information or a verified calculation. Each changed dimension must include its value and provenance. Never change dimensions based on unsupported guesses.",
+      parameters: {
+        type: "object",
+        additionalProperties: false,
+        required: ["elementId", "dimensions"],
+        properties: {
+          elementId: { type: "string", minLength: 1 },
+          dimensions: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              width: { type: "object", required: ["value", "provenance"], properties: { value: { type: "number", exclusiveMinimum: 0 }, provenance } },
+              depth: { type: "object", required: ["value", "provenance"], properties: { value: { type: "number", exclusiveMinimum: 0 }, provenance } },
+              height: { type: "object", required: ["value", "provenance"], properties: { value: { type: "number", exclusiveMinimum: 0 }, provenance } },
+              thickness: { type: "object", required: ["value", "provenance"], properties: { value: { type: "number", exclusiveMinimum: 0 }, provenance } },
+              length: { type: "object", required: ["value", "provenance"], properties: { value: { type: "number", exclusiveMinimum: 0 }, provenance } }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
       name: "inspect_model_element",
       description: "Retrieve the stored dimensions, location, material and reinforcement information for a specific model element. Use when the user asks to inspect or explain a beam, column, slab, wall or foundation.",
       parameters: {
@@ -129,6 +178,76 @@ function executeTool(name, args, state) {
     }
     state.actions.push(action);
     return { ok: true, action };
+  }
+
+  if (name === "generate_reinforcement_layout") {
+    if (!state.model) return { ok: false, error: "Generate the building model before adding reinforcement." };
+    const allowed = ["longitudinal", "transverse", "top", "bottom", "both_faces", "closed_stirrups", "links", "mesh", "custom"];
+    if (typeof args.elementId !== "string" || !allowed.includes(args.arrangement)) return { ok: false, error: "Invalid reinforcement target or arrangement." };
+    const provenanceValue = args.provenance;
+    if (!provenanceValue || !["specified", "calculated", "inferred", "assumed", "missing", "unverified"].includes(provenanceValue.status)) return { ok: false, error: "Reinforcement provenance is required." };
+    const barDiameter = args.barDiameter;
+    if (!barDiameter || !Number.isFinite(barDiameter.value) || barDiameter.value <= 0 || !barDiameter.provenance || !["specified", "calculated", "inferred", "assumed", "missing", "unverified"].includes(barDiameter.provenance.status)) return { ok: false, error: "A positive bar diameter and its provenance are required." };
+    for (const key of ["spacing", "cover"]) {
+      if (args[key] && (!Number.isFinite(args[key].value) || args[key].value <= 0 || !args[key].provenance || !["specified", "calculated", "inferred", "assumed", "missing", "unverified"].includes(args[key].provenance.status))) return { ok: false, error: key + " must be positive and include provenance." };
+    }
+    if (args.quantity !== undefined && (!Number.isInteger(args.quantity) || args.quantity < 1)) return { ok: false, error: "quantity must be a positive integer." };
+    let target = null;
+    for (const [category, elements] of Object.entries(state.model.structure || {})) {
+      if (Array.isArray(elements)) {
+        const found = elements.find(item => item.id === args.elementId);
+        if (found) { target = found; break; }
+      }
+    }
+    if (!target) return { ok: false, error: "The target structural element was not found." };
+    target.reinforcement = Array.isArray(target.reinforcement) ? target.reinforcement : [];
+    const layout = {
+      arrangement: args.arrangement,
+      barDiameter,
+      ...(args.quantity !== undefined ? { quantity: args.quantity } : {}),
+      ...(args.spacing ? { spacing: args.spacing } : {}),
+      ...(args.cover ? { cover: args.cover } : {}),
+      ...(args.grade ? { grade: args.grade } : {}),
+      ...(args.notes ? { notes: args.notes } : {}),
+      provenance: provenanceValue
+    };
+    target.reinforcement.push(layout);
+    const validation = validateBuildingModel(state.model);
+    if (!validation.valid) {
+      target.reinforcement.pop();
+      return { ok: false, error: "The reinforcement layout failed model validation.", validationErrors: validation.errors.slice(0, 20) };
+    }
+    state.actions.push({ type: "model.reinforcement.add", elementId: args.elementId, layout });
+    return { ok: true, elementId: args.elementId, reinforcementLayouts: target.reinforcement.length };
+  }
+
+  if (name === "update_element_dimensions") {
+    if (!state.model) return { ok: false, error: "Generate the building model before updating dimensions." };
+    if (!args.dimensions || typeof args.dimensions !== "object" || Array.isArray(args.dimensions)) return { ok: false, error: "dimensions must be an object." };
+    const allowedKeys = ["width", "depth", "height", "thickness", "length"];
+    const entries = Object.entries(args.dimensions);
+    if (!entries.length || entries.some(([key, value]) => !allowedKeys.includes(key) || !value || !Number.isFinite(value.value) || value.value <= 0 || !value.provenance || !["specified", "calculated", "inferred", "assumed", "missing", "unverified"].includes(value.provenance.status))) return { ok: false, error: "Every updated dimension must be positive and include valid provenance." };
+    let target = null;
+    for (const elements of Object.values(state.model.structure || {})) {
+      if (Array.isArray(elements)) {
+        const found = elements.find(item => item.id === args.elementId);
+        if (found) { target = found; break; }
+      }
+    }
+    if (!target) return { ok: false, error: "The target structural element was not found." };
+    const before = {};
+    for (const [key, value] of entries) {
+      if (!(key in target)) return { ok: false, error: "Dimension " + key + " does not apply to this element." };
+      before[key] = target[key];
+      target[key] = value;
+    }
+    const validation = validateBuildingModel(state.model);
+    if (!validation.valid) {
+      Object.assign(target, before);
+      return { ok: false, error: "The dimension update failed model validation.", validationErrors: validation.errors.slice(0, 20) };
+    }
+    state.actions.push({ type: "model.element.update", elementId: args.elementId, dimensions: args.dimensions });
+    return { ok: true, elementId: args.elementId, updatedDimensions: Object.keys(args.dimensions) };
   }
 
   if (name === "inspect_model_element") {
