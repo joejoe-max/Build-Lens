@@ -56,3 +56,6 @@
 .selection-row{justify-content:space-between;color:#aab6bd;gap:5px}
 .selection-row>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
 @media(max-width:760px){.viewport-inspection-tools{top:7px;left:7px;transform:none;width:calc(100% - 14px);gap:4px;padding:5px}.inspection-row{gap:4px;flex-wrap:wrap}.inspection-button,.inspection-row select{min-height:25px;padding:4px 6px;font-size:8px}.inspection-slider-row{flex-wrap:nowrap}.selection-row>span{font-size:8px;flex-basis:100%;order:0}.selection-row .inspection-button{flex:1}.viewport-badge{top:116px}.orientation-cube{top:118px}}
+
+.measurement-status{min-height:18px;color:#d7c49b;font-size:9px}
+@media(max-width:760px){.measurement-status{font-size:8px;min-height:16px}}
