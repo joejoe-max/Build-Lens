@@ -208,10 +208,30 @@ export default function App() {
     setHasStartedChat(true);
     setMobilePanel(true);
     try {
+      // Keep the request comfortably below Vercel's function body limit.
+      // Document text from every active project file is retained; only a
+      // maximum of three compressed visual previews are sent per request.
+      let remainingVisualPreviews = 3;
+      const requestAttachments = attachmentSnapshot.map(({ name, type, kind, content, dataUrl, pageImages }) => {
+        let visual = [];
+        if (kind === "image" && typeof dataUrl === "string" && remainingVisualPreviews > 0) {
+          visual = [{ dataUrl }];
+          remainingVisualPreviews -= 1;
+        } else if (Array.isArray(pageImages) && remainingVisualPreviews > 0) {
+          visual = pageImages.slice(0, remainingVisualPreviews);
+          remainingVisualPreviews -= visual.length;
+        }
+        return {
+          name, type, kind,
+          ...(typeof content === "string" ? { content } : {}),
+          ...(visual.length && kind === "image" ? { dataUrl: visual[0].dataUrl } : {}),
+          ...(visual.length && kind !== "image" ? { pageImages: visual } : {})
+        };
+      });
       await askBuildLens({
         message: userText,
         history,
-        attachments: attachmentSnapshot.map(({ name, type, kind, content, dataUrl, pageImages }) => ({ name, type, kind, content, dataUrl, pageImages })),
+        attachments: requestAttachments,
         currentModel: modelSpec,
         onActions: result => {
           if (result.model) setModelSpec(result.model);
