@@ -29,7 +29,7 @@ export default async function handler(req, res) {
 
   const body = req.body || {};
   const message = typeof body.message === "string" ? body.message.trim() : "";
-  const history = Array.isArray(body.history) ? body.history.slice(-10) : [];
+  const history = Array.isArray(body.history) ? body.history.slice(-20) : [];
   const attachments = Array.isArray(body.attachments) ? body.attachments.slice(0, 8) : [];
 
   if (!message) return res.status(400).json({ error: "Enter a message first." });
@@ -48,16 +48,23 @@ export default async function handler(req, res) {
       /^data:image\/(jpeg|png|webp);base64,/.test(item.dataUrl) && item.dataUrl.length <= 1500000) {
       imageParts.push({ type: "image_url", image_url: { url: item.dataUrl, detail: "high" } });
     }
+    if (Array.isArray(item.pageImages)) {
+      for (const page of item.pageImages.slice(0, 2)) {
+        if (typeof page?.dataUrl === "string" && /^data:image\\/(jpeg|png|webp);base64,/.test(page.dataUrl) && page.dataUrl.length <= 850000) {
+          imageParts.push({ type: "image_url", image_url: { url: page.dataUrl, detail: "high" } });
+        }
+      }
+    }
   }
   if (attachmentText.length > 60000) attachmentText = attachmentText.slice(0, 60000) + "\n[Document text truncated.]";
-  if (imageParts.length > 4) return res.status(400).json({ error: "Attach no more than four pictures per message." });
+  if (imageParts.length > 3) imageParts.length = 3;
 
   const apiKey = process.env.META_API_KEY;
   if (!apiKey) return res.status(503).json({ error: "Meta Model API is not configured. Add META_API_KEY in Vercel environment variables." });
 
   const messages = [
     { role: "developer", content: SYSTEM_PROMPT },
-    ...history.map(({ role, content }) => ({ role, content })),
+    ...history.map(({ role, content }) => ({ role, content: content.slice(0, 12000) })),
     { role: "user", content: imageParts.length ? [{ type: "text", text: message + attachmentText }, ...imageParts] : message + attachmentText }
   ];
 
