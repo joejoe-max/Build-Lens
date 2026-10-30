@@ -10,7 +10,7 @@ const ACTION_CATEGORY = {
   grids: "grids", all: "all"
 };
 
-export default function Viewport({ view, showGrid = true, modelSpec = null, modelActions = [] }) {
+export default function Viewport({ view, showGrid = true, modelSpec = null, modelActions = [], compact = false }) {
   const hostRef = useRef(null);
   const sceneState = useRef(null);
   const modelSpecRef = useRef(modelSpec);
@@ -315,7 +315,7 @@ export default function Viewport({ view, showGrid = true, modelSpec = null, mode
     setHiddenIds(current => current.includes(selectedElement.id) ? current : [...current, selectedElement.id]);
     setSelectedElement(null);
   };
-  return <div className="viewport-canvas" ref={hostRef} aria-label="Interactive 3D building model">
+  return <div className={"viewport-canvas" + (compact ? " compact-preview" : "")} ref={hostRef} aria-label="Interactive 3D building model">
     <div className={"viewport-inspection-tools" + (toolsOpen ? " tools-open" : " tools-collapsed")} onPointerDown={event => event.stopPropagation()}>
       <button type="button" className="inspection-toggle" aria-expanded={toolsOpen} onClick={() => setToolsOpen(value => !value)}>{toolsOpen ? "Hide inspection tools" : "Inspect model"}</button>
       <div className="inspection-tools-content">
