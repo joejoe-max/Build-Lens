@@ -1,14 +1,26 @@
 import { BUILDING_MODEL_SCHEMA, validateBuildingModel } from "../src/domain/buildingModel.js";
 
 const SYSTEM_PROMPT = `You are BuildLens, an AI building reconstruction and engineering assistant.
-Your purpose is to interpret uploaded building drawings, structural plans, schedules and calculations, then use the available tools to build and update a structured 3D building model.
-Do not merely describe a model when the user asks you to generate or modify one: call the appropriate model tool.
-Use render_building_model for a newly interpreted complete building. Use update_building_model when revising an existing model. Use set_model_visibility for display requests and inspect_model_element to retrieve details.
-Only include dimensions, positions and reinforcement supported by the supplied documents or transparent calculations. Never invent engineering dimensions, reinforcement, loads, material strengths, design-code checks or calculation results.
-Every engineering value must carry provenance: specified, calculated, inferred, assumed, missing or unverified. If critical information is unavailable, leave it out or mark it missing/unverified and explain what is needed. Do not silently convert assumptions into specified values.
-All coordinates and dimensions must use the model's declared units. Coordinates use x/z for plan and y for vertical.
-A successful model tool call updates the project's model data. The Three.js renderer will consume that structured model. Do not claim that the 3D viewport has already updated unless the application confirms it.
-Do not certify structural safety. Distinguish drawing interpretation from verified engineering design. Use Markdown when useful and keep answers practical.`;
+Your primary job is to interpret the user's actual uploaded engineering documents and reconstruct the building they describe. Do not replace this with a generic sample building or a text-only description.
+DOCUMENT INTERPRETATION WORKFLOW:
+1. Inspect every supplied source: extracted PDF page text, visible PDF page previews, images, schedules, sections, details and calculations. Use the filename and page number as source references.
+2. First call record_drawing_observations to create an evidence ledger of important facts before creating geometry. Record individual observations with exact source file/page, category, element ID where identifiable, property, value, unit, confidence and provenance. Separate explicit drawing notes from values calculated from supplied data and visual inferences.
+3. Cross-check plans against sections, elevations, schedules and calculations. Prefer dimension strings and schedules over estimating from visual scale. If dimensions conflict, record both and flag the conflict; do not silently choose one.
+4. Establish a coordinate convention and datum. Use x/z for plan coordinates and y for vertical elevations. Convert all values consistently into the model's declared units. State the coordinate origin and any orientation convention in model metadata/generalNotes.
+5. Build grids and floor levels first, then locate columns, beams, slabs, walls and foundations against those references. Use member schedules to populate cross-sections. Use foundation plans/sections for below-ground geometry.
+6. Read reinforcement callouts carefully: bar diameter, count, spacing, layers/faces, anchorage and cover. Only create individual reinforcement bars when their positions can be derived from explicit geometry and documented arrangement. If bar positions cannot be uniquely determined, preserve the schedule/callout as reinforcement metadata and explain what additional detail is required. Never invent bar placement.
+7. After recording observations, call render_building_model for a new model or update_building_model for an existing model. Use only supported values. Do not create a complete-looking model by filling unknown dimensions with guesses.
+8. Explain what was successfully reconstructed, what remains missing, any drawing conflicts and which source pages support key dimensions.
+INTERPRETATION RULES:
+- Distinguish specified, calculated, inferred, assumed, missing and unverified values. Use source page and calculation notes for every engineering value.
+- Never infer a dimension from image scale unless a reliable printed scale and image calibration are both available; if doing so, mark it inferred and explain the method.
+- Do not treat a line weight, hatch, symbol or unclear callout as certain without corroborating evidence.
+- If source pages are missing, cropped, blurry or unreadable, say exactly which information could not be read.
+- Never invent engineering dimensions, reinforcement, loads, material strengths, design-code checks or calculation results.
+- Do not certify structural safety. Distinguish drawing interpretation from verified engineering design.
+MODEL AND TOOL BEHAVIOUR:
+Use render_building_model for a newly interpreted building. Use update_building_model when revising an existing model. Use set_model_visibility for display requests and inspect_model_element for element details. A successful model tool call updates project model data; the application handles Three.js rendering. Do not claim a viewport update unless confirmed.
+Keep the answer practical. Summarize extracted evidence, model contents, uncertainties and next required information.`;
 
 export const config = { maxDuration: 60 };
 
@@ -27,6 +39,43 @@ const provenance = {
 };
 
 const tools = [
+  {
+    type: "function",
+    function: {
+      name: "record_drawing_observations",
+      description: "Record evidence extracted from uploaded drawings, schedules, sections and calculations before generating the 3D model. Include exact source filename and page for each observation. Record only values actually supported by the source. Use a separate observation for each important dimension, location, level, reinforcement callout or conflict.",
+      parameters: {
+        type: "object",
+        additionalProperties: false,
+        required: ["observations"],
+        properties: {
+          observations: {
+            type: "array",
+            minItems: 1,
+            maxItems: 250,
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: ["sourceFile", "sourcePage", "category", "property", "value", "unit", "provenance", "description"],
+              properties: {
+                sourceFile: { type: "string", minLength: 1 },
+                sourcePage: { type: "integer", minimum: 1 },
+                category: { type: "string", enum: ["grid", "level", "column", "beam", "slab", "wall", "foundation", "reinforcement", "material", "load", "calculation", "general", "conflict", "missing_information"] },
+                elementId: { type: "string" },
+                property: { type: "string", minLength: 1 },
+                value: { type: ["string", "number", "boolean"] },
+                unit: { type: "string" },
+                provenance: { type: "string", enum: ["specified", "calculated", "inferred", "assumed", "unverified", "missing"] },
+                confidence: { type: "number", minimum: 0, maximum: 1 },
+                description: { type: "string", minLength: 1 },
+                sourceExcerpt: { type: "string" }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
   {
     type: "function",
     function: {
@@ -173,6 +222,37 @@ function findElement(model, elementId) {
 function executeTool(name, args, state) {
   if (!args || typeof args !== "object" || Array.isArray(args)) {
     return { ok: false, error: "Tool arguments must be a JSON object." };
+  }
+
+  if (name === "record_drawing_observations") {
+    if (!Array.isArray(args.observations) || !args.observations.length || args.observations.length > 250) {
+      return { ok: false, error: "Provide between 1 and 250 drawing observations." };
+    }
+    const allowedCategories = ["grid", "level", "column", "beam", "slab", "wall", "foundation", "reinforcement", "material", "load", "calculation", "general", "conflict", "missing_information"];
+    const allowedProvenance = ["specified", "calculated", "inferred", "assumed", "unverified", "missing"];
+    const clean = [];
+    for (const item of args.observations) {
+      if (!item || typeof item.sourceFile !== "string" || !item.sourceFile.trim() ||
+        !Number.isInteger(item.sourcePage) || item.sourcePage < 1 ||
+        !allowedCategories.includes(item.category) || typeof item.property !== "string" || !item.property.trim() ||
+        !["string", "number", "boolean"].includes(typeof item.value) ||
+        typeof item.unit !== "string" || !allowedProvenance.includes(item.provenance) ||
+        typeof item.description !== "string" || !item.description.trim() ||
+        (item.confidence !== undefined && (!Number.isFinite(item.confidence) || item.confidence < 0 || item.confidence > 1))) {
+        return { ok: false, error: "An observation is missing a valid source, page, category, property, value, unit, provenance or description." };
+      }
+      clean.push({
+        sourceFile: item.sourceFile.slice(0, 180), sourcePage: item.sourcePage,
+        category: item.category, ...(item.elementId ? { elementId: String(item.elementId).slice(0, 100) } : {}),
+        property: item.property.slice(0, 120), value: item.value, unit: item.unit.slice(0, 40),
+        provenance: item.provenance, ...(item.confidence !== undefined ? { confidence: item.confidence } : {}),
+        description: item.description.slice(0, 600), ...(item.sourceExcerpt ? { sourceExcerpt: String(item.sourceExcerpt).slice(0, 500) } : {})
+      });
+    }
+    state.findings.push(...clean);
+    state.findings = state.findings.slice(-500);
+    state.actions.push({ type: "document.observations.add", observations: clean });
+    return { ok: true, recorded: clean.length, totalObservations: state.findings.length };
   }
 
   if (name === "render_building_model" || name === "update_building_model") {
@@ -369,7 +449,7 @@ export default async function handler(req, res) {
     if (!validation.valid) return res.status(400).json({ error: "The current project model is invalid.", details: validation.errors.slice(0, 20) });
   }
 
-  const state = { model: currentModel, actions: [] };
+  const state = { model: currentModel, actions: [], findings: [] };
   const modelContext = currentModel
     ? "\n\nCurrent validated project model (preserve its existing verified data unless instructed otherwise):\n" + JSON.stringify(currentModel).slice(0, 50000)
     : "\n\nNo building model has been generated for this project yet.";
@@ -439,7 +519,8 @@ export default async function handler(req, res) {
     return res.status(200).json({
       answer: finalAnswer,
       actions: state.actions,
-      model: state.model
+      model: state.model,
+      findings: state.findings
     });
   } catch (error) {
     console.error("BuildLens Meta request failed:", error?.name || "Error");
