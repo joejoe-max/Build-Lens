@@ -129,6 +129,7 @@ const structuralSchema = {
         properties: {
           ...memberBase,
           outline: { type: "array", minItems: 3, items: point2 },
+          openings: { type: "array", items: { type: "object", additionalProperties: false, required: ["id", "outline"], properties: { id: { type: "string", minLength: 1 }, outline: { type: "array", minItems: 3, items: point2 } } } },
           elevation: dimension,
           thickness: dimension,
         },
@@ -141,7 +142,7 @@ const structuralSchema = {
         required: ["id", "start", "end", "height", "thickness", "provenance"],
         properties: {
           ...memberBase, start: point3, end: point3, height: dimension, thickness: dimension,
-          openings: { type: "array", items: { type: "object", required: ["id", "width", "height"], properties: { id: { type: "string" }, width: dimension, height: dimension, sillHeight: dimension } } },
+          openings: { type: "array", items: { type: "object", additionalProperties: false, required: ["id", "positionFromStart", "width", "height"], properties: { id: { type: "string", minLength: 1 }, positionFromStart: dimension, width: dimension, height: dimension, sillHeight: dimension } } },
         },
       },
     },
@@ -322,11 +323,27 @@ export function validateBuildingModel(model) {
           else item.outline.forEach((point, j) => checkPoint(point, ["x", "z"], `${path}.outline[${j}]`, errors));
           checkDimension(item.thickness, `${path}.thickness`, errors);
           if (item.elevation) checkSignedMeasurement(item.elevation, `${path}.elevation`, errors);
+          if (item.openings !== undefined) {
+            if (!Array.isArray(item.openings)) errors.push(`${path}.openings must be an array`);
+            else item.openings.forEach((opening, j) => {
+              const op = `${path}.openings[${j}]`;
+              if (!opening || typeof opening.id !== "string" || !opening.id.trim() || !Array.isArray(opening.outline) || opening.outline.length < 3) errors.push(`${op} requires an id and a polygon outline`);
+              else opening.outline.forEach((point, k) => checkPoint(point, ["x", "z"], `${op}.outline[${k}]`, errors));
+            });
+          }
         } else if (category === "walls") {
           checkPoint(item.start, ["x", "y", "z"], `${path}.start`, errors);
           checkPoint(item.end, ["x", "y", "z"], `${path}.end`, errors);
           checkDimension(item.height, `${path}.height`, errors);
           checkDimension(item.thickness, `${path}.thickness`, errors);
+          const wallLength = Math.hypot((item.end?.x || 0) - (item.start?.x || 0), (item.end?.z || 0) - (item.start?.z || 0));
+          for (const [j, opening] of (item.openings || []).entries()) {
+            const op = `${path}.openings[${j}]`;
+            for (const key of ["positionFromStart", "width", "height"]) checkDimension(opening[key], `${op}.${key}`, errors);
+            if (opening.sillHeight) checkDimension(opening.sillHeight, `${op}.sillHeight`, errors);
+            if (isFiniteNumber(opening.positionFromStart?.value) && isFiniteNumber(opening.width?.value) && opening.positionFromStart.value + opening.width.value > wallLength + 0.001) errors.push(`${op} extends beyond the wall length`);
+            if (isFiniteNumber(opening.height?.value) && isFiniteNumber(item.height?.value) && isFiniteNumber(opening.sillHeight?.value || 0) && opening.height.value + (opening.sillHeight?.value || 0) > item.height.value + 0.001) errors.push(`${op} extends beyond the wall height`);
+          }
         } else if (category === "foundations") {
           checkPoint(item.center, ["x", "y", "z"], `${path}.center`, errors);
           for (const key of ["width", "length", "depth"]) checkDimension(item[key], `${path}.${key}`, errors);
