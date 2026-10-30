@@ -75,8 +75,10 @@ export default async function handler(req, res) {
         model: "muse-spark-1.3",
         stream: false,
         messages,
-        temperature: 0.2,
-        max_tokens: 1800
+        // Muse Spark is a reasoning model. Reasoning and the final answer share
+        // the completion budget; a small max_tokens value can leave content empty.
+        max_completion_tokens: 8192,
+        reasoning_effort: "low"
       })
     });
 
@@ -98,10 +100,26 @@ export default async function handler(req, res) {
       });
     }
 
-    const answer = extractAnswer(payload);
+    const choice = payload?.choices?.[0];
+    const answer = extractAnswer(payload) || getText(choice?.message?.refusal) || getText(choice?.text);
     if (!answer.trim()) {
-      console.error("Meta API response had no supported text field. Top-level keys:", Object.keys(payload || {}).join(","));
-      return res.status(502).json({ error: "Meta AI completed the request but returned no readable answer. Check the provider's response format." });
+      // Log only response metadata, never prompts, document text, or model reasoning.
+      console.error("Meta API returned an empty user-facing answer:", JSON.stringify({
+        finish_reason: choice?.finish_reason || null,
+        message_keys: Object.keys(choice?.message || {}),
+        has_reasoning_content: Boolean(choice?.message?.reasoning_content || choice?.message?.reasoning),
+        reasoning_characters: String(choice?.message?.reasoning_content || choice?.message?.reasoning || "").length,
+        tool_call_count: Array.isArray(choice?.message?.tool_calls) ? choice.message.tool_calls.length : 0,
+        usage: payload?.usage || null,
+        model: payload?.model || null
+      }));
+      const finish = choice?.finish_reason;
+      const detail = finish === "length"
+        ? "The model used its output-token budget on reasoning before producing the final answer. The output budget has been increased; please try again."
+        : finish === "tool_calls"
+          ? "The model returned a tool call instead of a text answer, but BuildLens has no tool handler configured for this request."
+          : "The provider returned no user-facing text. Please try again; diagnostic metadata has been recorded.";
+      return res.status(502).json({ error: detail });
     }
 
     return res.status(200).json({ answer });
