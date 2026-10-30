@@ -166,6 +166,11 @@ export default function App() {
         message: userText,
         history,
         attachments: attachmentSnapshot.map(({ name, type, kind, content, dataUrl, pageImages }) => ({ name, type, kind, content, dataUrl, pageImages })),
+        currentModel: modelSpec,
+        onActions: result => {
+          if (result.model) setModelSpec(result.model);
+          if (result.actions?.length) setModelActions(current => [...current, ...result.actions].slice(-100));
+        },
         onDelta: streamed => {
           const next = [...messagesRef.current];
           const last = next.length - 1;
@@ -188,7 +193,7 @@ export default function App() {
   };
 
   const exportWorkspace = () => {
-    const blob = new Blob([JSON.stringify({ app: "BuildLens", exportedAt: new Date().toISOString(), projectName, files, messages }, null, 2)], { type: "application/json" });
+    const blob = new Blob([JSON.stringify({ app: "BuildLens", exportedAt: new Date().toISOString(), projectName, files, messages, modelSpec, modelActions }, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a"); a.href = url; a.download = "buildlens-workspace.json"; a.click(); URL.revokeObjectURL(url);
   };
