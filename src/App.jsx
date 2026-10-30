@@ -223,7 +223,7 @@ export default function App() {
         <div className="viewport-wrap">
           <Viewport view={view} showGrid={showGrid} />
           <div className="viewport-badge"><span className="live-dot" /> CONCEPT MODEL <span className="badge-divider">/</span> DEMO DATA</div>
-          <div className="viewport-instructions"><span>DRAG TO ORBIT</span><i /><span>SCROLL OR PINCH TO ZOOM</span></div>
+          <div className="viewport-instructions"><span>DRAG TO ORBIT</span><i /><span>RIGHT-DRAG / TWO-FINGER DRAG TO PAN</span><i /><span>SCROLL / PINCH TO ZOOM</span></div>
           <div className="orientation-cube" aria-label="View orientation"><span className="cube-top">Y</span><span className="cube-front">Z</span><span className="cube-side">X</span></div>
         </div>
         <ModelViewTabs view={view} onViewChange={setView} />
