@@ -7,7 +7,7 @@ import Viewport from "./components/Viewport.jsx";
 import ModelControls, { ModelViewTabs } from "./components/ModelControls.jsx";
 import EngineeringPanel from "./components/EngineeringPanel.jsx";
 import AssumptionPanel from "./components/AssumptionPanel.jsx";
-import { askBuildLens } from "./services/ai.js";
+import { askBuildLens } from "./services/ai.js";\nimport { createEmptyBuildingModel } from "./domain/buildingModel.js";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
@@ -70,7 +70,7 @@ export default function App() {
   const [view, setView] = useState("building");
   const [files, setFiles] = useState([]);
   const [pendingAttachments, setPendingAttachments] = useState([]);
-  const [projectAttachments, setProjectAttachments] = useState([]);
+  const [projectAttachments, setProjectAttachments] = useState([]);\n  const [modelSpec, setModelSpec] = useState(null);\n  const [modelActions, setModelActions] = useState([]);
   const messagesRef = useRef([]);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
@@ -91,16 +91,16 @@ export default function App() {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed.messages) && parsed.messages.length) { messagesRef.current = parsed.messages; setMessages(parsed.messages); }
         if (Array.isArray(parsed.files)) setFiles(parsed.files);
-        if (typeof parsed.projectName === "string") setProjectName(parsed.projectName);
+        if (typeof parsed.projectName === "string") setProjectName(parsed.projectName);\n        if (parsed.modelSpec && typeof parsed.modelSpec === "object") setModelSpec(parsed.modelSpec);\n        if (Array.isArray(parsed.modelActions)) setModelActions(parsed.modelActions);
       }
     } catch { /* Ignore invalid local workspace data. */ }
   }, []);
 
   useEffect(() => {
     try {
-      localStorage.setItem("buildlens-workspace-v2", JSON.stringify({ messages: messages.slice(-30), files, projectName }));
+      localStorage.setItem("buildlens-workspace-v2", JSON.stringify({ messages: messages.slice(-30), files, projectName, modelSpec, modelActions: modelActions.slice(-100) }));
     } catch { setNotice("Workspace storage is full. Remove some files or export the workspace."); }
-  }, [messages, files, projectName]);
+  }, [messages, files, projectName, modelSpec, modelActions]);
 
   const addFiles = async event => {
     const selected = Array.from(event.target.files || []);
@@ -191,7 +191,7 @@ export default function App() {
 
   const clearWorkspace = () => {
     if (!window.confirm("Clear this workspace's chat and uploaded-file list? This cannot be undone.")) return;
-    messagesRef.current = []; setMessages([]); setFiles([]); setPendingAttachments([]); setProjectAttachments([]); setNotice("Workspace cleared.");
+    messagesRef.current = []; setMessages([]); setFiles([]); setPendingAttachments([]); setProjectAttachments([]); setModelSpec(null); setModelActions([]); setNotice("Workspace cleared.");
   };
 
   return <main className="app-shell">
@@ -217,12 +217,12 @@ export default function App() {
       </aside>
       <section className="model-column">
         <div className="model-toolbar">
-          <div className="toolbar-left"><span className="section-kicker">3D VIEWPORT</span><span className="toolbar-divider" /><span className="model-caption">Illustrative sample · not to scale</span></div>
+          <div className="toolbar-left"><span className="section-kicker">3D VIEWPORT</span><span className="toolbar-divider" /><span className="model-caption">{modelSpec ? `${modelSpec.name} · ${modelSpec.units}` : "Illustrative sample · not to scale"}</span></div>
           <ModelControls showGrid={showGrid} onToggleGrid={() => setShowGrid(value => !value)} onReset={() => document.querySelector(".viewport-canvas")?.dispatchEvent(new CustomEvent("buildlens-reset"))} />
         </div>
         <div className="viewport-wrap">
-          <Viewport view={view} showGrid={showGrid} />
-          <div className="viewport-badge"><span className="live-dot" /> CONCEPT MODEL <span className="badge-divider">/</span> DEMO DATA</div>
+          <Viewport view={view} showGrid={showGrid} modelSpec={modelSpec} modelActions={modelActions} />
+          <div className="viewport-badge"><span className="live-dot" /> {modelSpec ? "PROJECT MODEL DATA RECEIVED" : "CONCEPT MODEL"} <span className="badge-divider">/</span> {modelSpec ? "VALIDATED" : "DEMO DATA"}</div>
           <div className="viewport-instructions"><span>DRAG TO ORBIT</span><i /><span>RIGHT-DRAG / TWO-FINGER DRAG TO PAN</span><i /><span>SCROLL / PINCH TO ZOOM</span></div>
           <div className="orientation-cube" aria-label="View orientation"><span className="cube-top">Y</span><span className="cube-front">Z</span><span className="cube-side">X</span></div>
         </div>
