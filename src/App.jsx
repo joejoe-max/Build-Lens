@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { ChevronDown, FileUp, Layers3, MessageSquare, Plus, X, ArrowRight } from "lucide-react";
 import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
+import pdfjsWorker from "pdfjs-dist/legacy/build/pdf.worker.min.mjs?url";
 import mammoth from "mammoth";
 import Viewport from "./components/Viewport.jsx";
 import ModelControls, { ModelViewTabs } from "./components/ModelControls.jsx";
@@ -8,7 +9,7 @@ import EngineeringPanel from "./components/EngineeringPanel.jsx";
 import AssumptionPanel from "./components/AssumptionPanel.jsx";
 import { askBuildLens } from "./services/ai.js";
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/legacy/build/pdf.worker.min.mjs", import.meta.url).toString();
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
 const MAX_FILE_SIZE = 12 * 1024 * 1024;
 const textExtensions = ["txt", "md", "csv", "json", "xml"];
@@ -30,15 +31,29 @@ async function readAttachment(file) {
   if (extension === "pdf" || file.type === "application/pdf") {
     const pdf = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
     const pages = [];
+    const pageImages = [];
     for (let pageNumber = 1; pageNumber <= Math.min(pdf.numPages, 35); pageNumber++) {
       const page = await pdf.getPage(pageNumber);
       const content = await page.getTextContent();
-      const text = content.items.map(item => item.str).join(" ").trim();
-      if (text) pages.push(`[Page ${pageNumber}]\n${text}`);
+      const text = content.items.map(item => item.str || "").join(" ").replace(/\\s+/g, " ").trim();
+      if (text) pages.push(`[Page ${pageNumber}]\\n${text}`);
+      // Extract both selectable text and visual page previews so drawings,
+      // schedules and scanned pages remain available to the vision model.
+      if (pageNumber <= 4) {
+        const base = page.getViewport({ scale: 1 });
+        const viewport = page.getViewport({ scale: Math.min(1.5, 1400 / base.width) });
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(viewport.width));
+        canvas.height = Math.max(1, Math.round(viewport.height));
+        await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
+        const dataUrl = canvas.toDataURL("image/jpeg", 0.72);
+        if (dataUrl.length <= 1400000) pageImages.push({ pageNumber, dataUrl });
+        canvas.width = 0; canvas.height = 0;
+      }
     }
-    const extracted = pages.join("\n\n");
-    if (!extracted) throw new Error(`${file.name} has no selectable text. Upload page screenshots/images for visual review.`);
-    return { id: crypto.randomUUID(), name: file.name, type: file.type, kind: "text", content: extracted.slice(0, 45000), status: "PDF text extracted" };
+    const extracted = pages.join("\\n\\n");
+    if (!extracted && !pageImages.length) throw new Error(`${file.name} could not be read. Try exporting it again as a standard PDF.`);
+    return { id: crypto.randomUUID(), name: file.name, type: "application/pdf", kind: "text", content: extracted.slice(0, 45000), pageImages, status: extracted ? `Text + ${pageImages.length} page preview(s) ready` : `Scanned PDF · ${pageImages.length} page image(s) ready` };
   }
   if (extension === "docx") {
     const result = await mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() });
@@ -54,7 +69,7 @@ async function readAttachment(file) {
 export default function App() {
   const [view, setView] = useState("building");
   const [files, setFiles] = useState([]);
-  const [pendingAttachments, setPendingAttachments] = useState([]);
+  const [pendingAttachments, setPendingAttachments] = useState([]);\n  const [projectAttachments, setProjectAttachments] = useState([]);\n  const messagesRef = useRef([]);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -72,7 +87,7 @@ export default function App() {
       const saved = localStorage.getItem("buildlens-workspace-v2");
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed.messages) && parsed.messages.length) setMessages(parsed.messages);
+        if (Array.isArray(parsed.messages) && parsed.messages.length) { messagesRef.current = parsed.messages; setMessages(parsed.messages); }
         if (Array.isArray(parsed.files)) setFiles(parsed.files);
         if (typeof parsed.projectName === "string") setProjectName(parsed.projectName);
       }
@@ -100,7 +115,7 @@ export default function App() {
     }
     if (next.length) {
       setFiles(current => [...current, ...next.map(({ id, name, type, status }) => ({ id, name, kind: name.split(".").pop().toUpperCase(), type, status }))]);
-      setPendingAttachments(current => [...current, ...next]);
+      setPendingAttachments(current => [...current, ...next]);\n      setProjectAttachments(current => [...current, ...next]);
       setNotice(`${next.length} file(s) ready. Add a question and send them to the assistant.`);
     }
     if (failures.length) setNotice(failures.slice(0, 3).join(" · "));
@@ -109,7 +124,7 @@ export default function App() {
 
   const removeFile = id => {
     setFiles(current => current.filter(file => file.id !== id));
-    setPendingAttachments(current => current.filter(file => file.id !== id));
+    setPendingAttachments(current => current.filter(file => file.id !== id));\n    setProjectAttachments(current => current.filter(file => file.id !== id));
   };
 
   const startNewChat = () => {
@@ -125,19 +140,31 @@ export default function App() {
     event?.preventDefault();
     const message = input.trim();
     if ((!message && !pendingAttachments.length) || busy) return;
-    const attachmentSnapshot = pendingAttachments.slice(0, 8);
-    const history = messages.slice(-8).map(({ role, content }) => ({ role, content }));
-    const userText = message || `Please inspect the ${attachmentSnapshot.length} attached file(s) and summarize what they contain.`;
+    const attachmentSnapshot = projectAttachments.slice(0, 8);
+    const history = messagesRef.current.filter(item => item && ["user", "assistant"].includes(item.role) && typeof item.content === "string" && item.content.trim()).slice(-20);
+    const userText = message || `Please inspect the ${attachmentSnapshot.length} project file(s) and summarize what they contain.`;
     const attachmentNames = attachmentSnapshot.map(file => file.name);
-    setMessages(current => [...current, { role: "user", content: attachmentNames.length ? `${userText}\n\nAttachments: ${attachmentNames.join(", ")}` : userText }]);
+    const userEntry = { role: "user", content: attachmentNames.length ? `${userText}\\n\\nProject files available: ${attachmentNames.join(", ")}` : userText };
+    messagesRef.current = [...history, userEntry, { role: "assistant", content: "" }];
+    setMessages(messagesRef.current);
     setInput("");
-    setPendingAttachments(current => current.filter(file => !attachmentSnapshot.some(item => item.id === file.id)));
+    setPendingAttachments([]);
     setBusy(true);
     setHasStartedChat(true);
     setMobilePanel(true);
-    setMessages(current => [...current, { role: "assistant", content: "" }]);
     try {
-      await askBuildLens({ message: userText, history, attachments: attachmentSnapshot.map(({ name, type, kind, content, dataUrl }) => ({ name, type, kind, content, dataUrl })), onDelta: streamed => setMessages(current => { const next = [...current]; const last = next.length - 1; if (last >= 0 && next[last].role === "assistant") next[last] = { ...next[last], content: streamed }; return next; }) });
+      await askBuildLens({
+        message: userText,
+        history,
+        attachments: attachmentSnapshot.map(({ name, type, kind, content, dataUrl, pageImages }) => ({ name, type, kind, content, dataUrl, pageImages })),
+        onDelta: streamed => {
+          const next = [...messagesRef.current];
+          const last = next.length - 1;
+          if (last >= 0 && next[last].role === "assistant") next[last] = { ...next[last], content: streamed };
+          messagesRef.current = next;
+          setMessages(next);
+        }
+      });
     } catch (error) {
       setMessages(current => {
         const next = [...current];
@@ -158,7 +185,7 @@ export default function App() {
 
   const clearWorkspace = () => {
     if (!window.confirm("Clear this workspace's chat and uploaded-file list? This cannot be undone.")) return;
-    setMessages([]); setFiles([]); setPendingAttachments([]); setNotice("Workspace cleared.");
+    messagesRef.current = []; setMessages([]); setFiles([]); setPendingAttachments([]); setProjectAttachments([]); setNotice("Workspace cleared.");
   };
 
   return <main className="app-shell">
