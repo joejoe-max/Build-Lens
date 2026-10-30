@@ -1,3 +1,4 @@
+import React from "react";
 import { ChevronDown, CircleAlert } from "lucide-react";
 
 export default function AssumptionPanel({ open, onToggle }) {
