@@ -91,6 +91,21 @@ const tools = [
           cover: { type: "object", additionalProperties: false, required: ["value", "provenance"], properties: { value: { type: "number", exclusiveMinimum: 0 }, provenance } },
           grade: { type: "string" },
           notes: { type: "string" },
+          bars: {
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: ["id", "start", "end", "diameter", "provenance"],
+              properties: {
+                id: { type: "string", minLength: 1 },
+                start: { type: "object", additionalProperties: false, required: ["x", "y", "z"], properties: { x: { type: "number" }, y: { type: "number" }, z: { type: "number" } } },
+                end: { type: "object", additionalProperties: false, required: ["x", "y", "z"], properties: { x: { type: "number" }, y: { type: "number" }, z: { type: "number" } } },
+                diameter: { type: "object", additionalProperties: false, required: ["value", "provenance"], properties: { value: { type: "number", exclusiveMinimum: 0 }, provenance } },
+                provenance
+              }
+            }
+          },
           provenance
         }
       }
@@ -192,6 +207,18 @@ function executeTool(name, args, state) {
       if (args[key] && (!Number.isFinite(args[key].value) || args[key].value <= 0 || !args[key].provenance || !["specified", "calculated", "inferred", "assumed", "missing", "unverified"].includes(args[key].provenance.status))) return { ok: false, error: key + " must be positive and include provenance." };
     }
     if (args.quantity !== undefined && (!Number.isInteger(args.quantity) || args.quantity < 1)) return { ok: false, error: "quantity must be a positive integer." };
+    if (args.bars !== undefined) {
+      if (!Array.isArray(args.bars) || args.bars.length > 1000) return { ok: false, error: "bars must be an array containing at most 1000 explicit bar definitions." };
+      for (const bar of args.bars) {
+        const validPoint = point => point && ["x", "y", "z"].every(key => Number.isFinite(point[key]));
+        if (!bar || typeof bar.id !== "string" || !bar.id.trim() || !validPoint(bar.start) || !validPoint(bar.end) ||
+          !Number.isFinite(bar.diameter?.value) || bar.diameter.value <= 0 ||
+          !["specified", "calculated", "inferred", "assumed", "missing", "unverified"].includes(bar.provenance?.status) ||
+          !["specified", "calculated", "inferred", "assumed", "missing", "unverified"].includes(bar.diameter.provenance?.status)) {
+          return { ok: false, error: "Each reinforcement bar needs an ID, finite start/end coordinates, a positive diameter and provenance." };
+        }
+      }
+    }
     let target = null;
     for (const [category, elements] of Object.entries(state.model.structure || {})) {
       if (Array.isArray(elements)) {
@@ -209,6 +236,7 @@ function executeTool(name, args, state) {
       ...(args.cover ? { cover: args.cover } : {}),
       ...(args.grade ? { grade: args.grade } : {}),
       ...(args.notes ? { notes: args.notes } : {}),
+      ...(args.bars ? { bars: args.bars } : {}),
       provenance: provenanceValue
     };
     target.reinforcement.push(layout);
