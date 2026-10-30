@@ -135,6 +135,17 @@ const structuralSchema = {
         },
       },
     },
+    stairs: {
+      type: "array",
+      items: {
+        type: "object", additionalProperties: false,
+        required: ["id", "start", "end", "width", "thickness", "steps", "provenance"],
+        properties: {
+          ...memberBase, start: point3, end: point3, width: dimension, thickness: dimension,
+          steps: { type: "integer", minimum: 1, maximum: 100 }
+        }
+      }
+    },
     walls: {
       type: "array",
       items: {
@@ -291,7 +302,7 @@ export function validateBuildingModel(model) {
   if (!isObject(model.metadata) || !Array.isArray(model.metadata.createdFrom)) errors.push("metadata.createdFrom must be an array");
   if (!isObject(model.structure)) errors.push("structure must be an object");
   else {
-    for (const category of ["columns", "beams", "slabs", "walls", "foundations"]) {
+    for (const category of ["columns", "beams", "slabs", "walls", "stairs", "foundations"]) {
       const items = model.structure[category] ?? [];
       if (!Array.isArray(items)) {
         errors.push(`structure.${category} must be an array`);
@@ -344,6 +355,14 @@ export function validateBuildingModel(model) {
             if (isFiniteNumber(opening.positionFromStart?.value) && isFiniteNumber(opening.width?.value) && opening.positionFromStart.value + opening.width.value > wallLength + 0.001) errors.push(`${op} extends beyond the wall length`);
             if (isFiniteNumber(opening.height?.value) && isFiniteNumber(item.height?.value) && isFiniteNumber(opening.sillHeight?.value || 0) && opening.height.value + (opening.sillHeight?.value || 0) > item.height.value + 0.001) errors.push(`${op} extends beyond the wall height`);
           }
+        } else if (category === "stairs") {
+          checkPoint(item.start, ["x", "y", "z"], `${path}.start`, errors);
+          checkPoint(item.end, ["x", "y", "z"], `${path}.end`, errors);
+          checkDimension(item.width, `${path}.width`, errors);
+          checkDimension(item.thickness, `${path}.thickness`, errors);
+          if (!Number.isInteger(item.steps) || item.steps < 1 || item.steps > 100) errors.push(`${path}.steps must be an integer from 1 to 100`);
+          if (item.start && item.end && Math.hypot(item.end.x-item.start.x,item.end.z-item.start.z)<=0) errors.push(`${path} must have a positive horizontal run`);
+          if (item.start && item.end && item.end.y<=item.start.y) errors.push(`${path}.end must be above its start`);
         } else if (category === "foundations") {
           checkPoint(item.center, ["x", "y", "z"], `${path}.center`, errors);
           for (const key of ["width", "length", "depth"]) checkDimension(item[key], `${path}.${key}`, errors);
