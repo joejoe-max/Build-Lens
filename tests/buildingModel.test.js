@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import * as THREE from "three";
+import { createBuildingModel } from "../src/three/BuildingModel.js";
 import {
   createEmptyBuildingModel,
   validateBuildingModel,
@@ -106,4 +108,42 @@ test("flags columns offset from supplied grids and reinforcement without a bar m
   const warnings = analyzeStructuralConnectivity(model).warnings;
   assert.ok(warnings.some(warning => warning.code === "off_grid_column" && warning.elementId === "C1"));
   assert.ok(warnings.some(warning => warning.code === "missing_bar_mark" && warning.elementId === "C1"));
+});
+
+test("renderer creates roof meshes and derives slab reinforcement from documented layout", () => {
+  const model = createEmptyBuildingModel();
+  const provenance = { status: "specified" };
+  model.structure.roofs.push({
+    id: "R-TEST",
+    type: "gable",
+    outline: [{ x: 0, z: 0 }, { x: 8, z: 0 }, { x: 8, z: 6 }, { x: 0, z: 6 }],
+    eavesElevation: { value: 6, provenance },
+    rise: { value: 2, provenance },
+    ridgeAxis: "x",
+    provenance
+  });
+  model.structure.slabs.push({
+    id: "S-TEST",
+    outline: [{ x: 0, z: 0 }, { x: 4, z: 0 }, { x: 4, z: 4 }, { x: 0, z: 4 }],
+    elevation: { value: 3, provenance },
+    thickness: { value: 0.15, provenance },
+    provenance,
+    reinforcement: [{
+      arrangement: "mesh",
+      barDiameter: { value: 0.012, provenance },
+      spacing: { value: 0.2, provenance },
+      cover: { value: 0.025, provenance },
+      barMark: "A1",
+      provenance
+    }]
+  });
+  const scene = new THREE.Scene();
+  const result = createBuildingModel(scene, model);
+  assert.ok(result.elements.some(element => element.userData.category === "roofs" && element.userData.id === "R-TEST"));
+  assert.ok(result.elements.filter(element => element.userData.category === "reinforcement").length > 0);
+  scene.traverse(object => {
+    object.geometry?.dispose?.();
+    if (Array.isArray(object.material)) object.material.forEach(material => material.dispose());
+    else object.material?.dispose?.();
+  });
 });
