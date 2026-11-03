@@ -111,7 +111,8 @@ export default function App() {
   const messagesRef = useRef([]);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
-  const [busy, setBusy] = useState(false);\n  const [busyLabel, setBusyLabel] = useState("BuildLens is responding…");
+  const [busy, setBusy] = useState(false);
+  const [busyLabel, setBusyLabel] = useState("BuildLens is responding…");
   const [mobilePanel, setMobilePanel] = useState(false);
   const [hasStartedChat, setHasStartedChat] = useState(false);
   const [showGrid, setShowGrid] = useState(true);
