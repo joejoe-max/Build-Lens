@@ -42,7 +42,7 @@ function addDerivedStirrups(group, elements, item, scale, category, MATERIALS) {
   const layouts = item.reinforcement || [];
   for (let li = 0; li < layouts.length; li++) {
     const layout = layouts[li];
-    if (!["closed_stirrups", "links"].includes(layout.arrangement) ||
+    if (!["closed_stirrups", "links"].includes(layout.arrangement) || layout.bars?.length ||
       !layout.spacing?.value || !layout.cover?.value || !layout.barDiameter?.value) continue;
     const start = category === "columns" ? vec(item.base, scale) : vec(item.start, scale);
     const end = category === "columns" ? vec(item.top, scale) : vec(item.end, scale);
@@ -121,7 +121,7 @@ function polygonIntersections(outline, axis, fixed) {
 }
 
 function addDerivedSlabReinforcement(group, elements, slab, layout, scale, topElevation, layoutIndex, MATERIALS) {
-  if (!layout.barDiameter?.value || !layout.spacing?.value || !layout.cover?.value) return;
+  if (!["mesh", "top", "bottom", "both_faces", "longitudinal", "transverse"].includes(layout.arrangement) || layout.bars?.length || !layout.barDiameter?.value || !layout.spacing?.value || !layout.cover?.value) return;
   const diameter = layout.barDiameter.value * scale;
   const spacing = layout.spacing.value * scale;
   const cover = layout.cover.value * scale + diameter / 2;
@@ -131,8 +131,8 @@ function addDerivedSlabReinforcement(group, elements, slab, layout, scale, topEl
   const maxX = Math.max(...outline.map(point => point.x)) * scale;
   const minZ = Math.min(...outline.map(point => point.z)) * scale;
   const maxZ = Math.max(...outline.map(point => point.z)) * scale;
-  const arrangement = layout.arrangement || "mesh";
-  const faces = arrangement === "top" ? ["top"] : arrangement === "bottom" ? ["bottom"] : ["top", "bottom"];
+  const arrangement = layout.arrangement;
+  const faces = arrangement === "top" ? ["top"] : arrangement === "bottom" ? ["bottom"] : ["longitudinal", "transverse"].includes(arrangement) ? ["top"] : ["top", "bottom"];
   const directions = arrangement === "longitudinal" ? ["x"] : arrangement === "transverse" ? ["z"] : ["x", "z"];
   const slabTop = topElevation * scale;
   const slabThickness = slab.thickness.value * scale;
