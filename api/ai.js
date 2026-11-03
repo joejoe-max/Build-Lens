@@ -543,6 +543,33 @@ export default async function handler(req, res) {
     { role: "user", content: imageParts.length ? [{ type: "text", text: message + attachmentText }, ...imageParts] : message + attachmentText }
   ];
 
+  // Keep one HTTP response open while the bounded Meta/tool sequence runs.
+  // Meta itself remains non-streaming in this first safe iteration.
+  res.statusCode = 200;
+  res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
+  res.flushHeaders?.();
+  let responseClosed = false;
+  const sendEvent = (event, data) => {
+    if (!responseClosed && !res.destroyed) res.write("event: " + event + "\\ndata: " + JSON.stringify(data) + "\\n\\n");
+  };
+  const heartbeat = setInterval(() => {
+    if (!responseClosed && !res.destroyed) res.write(": keep-alive\\n\\n");
+  }, 12000);
+  const closeStream = () => {
+    if (responseClosed) return;
+    responseClosed = true;
+    clearInterval(heartbeat);
+    if (!res.writableEnded) res.end();
+  };
+  res.on("close", () => {
+    if (!res.writableEnded) responseClosed = true;
+    clearInterval(heartbeat);
+  });
+  sendEvent("status", { message: "Reading the supplied project documents." });
+
   try {
     let payload = null;
     let finalAnswer = "";
@@ -555,7 +582,7 @@ export default async function handler(req, res) {
     for (let turn = 0; turn < maxTurns; turn++) {
       const remainingMs = deadline - Date.now();
       if (remainingMs < 1500) break;
-      const requestStartedAt = Date.now();
+      sendEvent('status', { message: currentModel ? 'Interpreting your instruction and preparing the model update.' : 'Interpreting drawings and preparing the building reconstruction.' });\n      const requestStartedAt = Date.now();
       payload = await callMeta({
         apiKey,
         messages,
@@ -602,15 +629,12 @@ export default async function handler(req, res) {
           hasText: Boolean(plainText),
           usage: payload?.usage || null
         }));
-        return res.status(422).json({
-          error: "Meta AI returned a text response but did not invoke the building reconstruction function. No 3D model was generated. Please retry; if this repeats, the model provider is not following the required tool call.",
-          actions: [],
-          model: null,
-          findings: []
-        });
+        sendEvent("error", { error: "Meta AI returned an explanation but did not invoke the building reconstruction function. No 3D model was generated." });
+        closeStream();
+        return;
       }
 
-      // Replay the complete assistant tool-call message before tool results.
+      sendEvent('status', { message: 'Applying and validating the AI reconstruction instructions.' });\n\n      // Replay the complete assistant tool-call message before tool results.
       messages.push({
         role: "assistant",
         content: assistantMessage.content || "",
@@ -640,7 +664,7 @@ export default async function handler(req, res) {
         messages.push({ role: "tool", tool_call_id: call.id, content: JSON.stringify(result) });
       }
 
-      if (!currentModel && state.model && state.actions.some(action => action.type === "model.replace")) {
+      if (state.actions.length) sendEvent('model', { actions: state.actions, model: state.model, findings: state.findings });\n\n      if (!currentModel && state.model && state.actions.some(action => action.type === "model.replace")) {
         const counts = Object.fromEntries(Object.entries(state.model.structure || {}).map(([key, value]) => [key, Array.isArray(value) ? value.length : 0]));
         const total = Object.values(counts).reduce((sum, value) => sum + value, 0);
         const geometryCount = ["columns", "beams", "slabs", "walls", "stairs", "foundations"]
@@ -664,14 +688,11 @@ export default async function handler(req, res) {
         actionTypes: state.actions.map(action => action.type),
         hasModel: Boolean(state.model)
       }));
-      return res.status(422).json({
-        error: errors
-          ? "The drawing was received, but model validation failed: " + errors + ". No 3D model was generated."
-          : "The drawing was received, but BuildLens could not complete the reconstruction within the request. No 3D model was reported as generated.",
-        actions: state.actions,
-        model: null,
-        findings: state.findings
-      });
+      sendEvent("error", { error: errors
+        ? "The drawing was received, but model validation failed: " + errors + ". No 3D model was generated."
+        : "The drawing was received, but BuildLens could not complete the reconstruction within the request. No 3D model was reported as generated." });
+      closeStream();
+      return;
     }
 
     if (!completed && currentModel) {
@@ -712,18 +733,17 @@ export default async function handler(req, res) {
       return res.status(502).json({ error: "Meta AI returned no user-facing answer. Please try again." });
     }
 
-    return res.status(200).json({
-      answer: finalAnswer,
-      actions: state.actions,
-      model: state.model,
-      findings: state.findings
-    });
+    sendEvent("done", { answer: finalAnswer, actions: state.actions, model: state.model, findings: state.findings });
+    closeStream();
+    return;
   } catch (error) {
     console.error("BuildLens Meta request failed:", JSON.stringify({
       name: error?.name || "Error",
       status: error?.status || 502,
       message: String(error?.message || "Unknown error").slice(0, 500)
     }));
-    return res.status(error.status || 502).json({ error: error.message || "Could not reach Meta AI. Check the connection and try again." });
+    sendEvent("error", { error: error.message || "Could not reach Meta AI. Check the connection and try again." });
+    closeStream();
+    return;
   }
 }
