@@ -377,8 +377,19 @@ export default function App() {
             for (const action of parsed.modelActions) {
               if (!action || !["model.visibility", "model.opacity"].includes(action.type)) continue;
               const scope = (action.elementIds || []).slice().sort().join(",");
-              if (action.category === "all") unique.clear();
-              else unique.delete(action.type + "|" + action.category + "|" + scope);
+              if (action.category === "all") {
+                for (const [key, existing] of unique) if (existing.type === action.type) unique.delete(key);
+              } else if (action.elementIds?.length) {
+                const ids = new Set(action.elementIds);
+                for (const [key, existing] of unique) {
+                  if (existing.type === action.type && existing.category === action.category &&
+                    (existing.elementIds || []).some(id => ids.has(id))) unique.delete(key);
+                }
+              } else {
+                for (const [key, existing] of unique) {
+                  if (existing.type === action.type && existing.category === action.category) unique.delete(key);
+                }
+              }
               unique.set(action.type + "|" + action.category + "|" + scope, action);
             }
             setModelActions([...unique.values()].slice(-40));
