@@ -130,6 +130,7 @@ export default function Viewport({ view, showGrid = true, modelSpec = null, mode
             clones.forEach((material, index) => {
               material.userData.buildLensBaseOpacity = originals[index].opacity;
               material.userData.buildLensBaseTransparent = originals[index].transparent;
+              material.userData.buildLensBaseDepthWrite = originals[index].depthWrite;
             });
             element.material = Array.isArray(element.material) ? clones : clones[0];
             element.userData.buildLensOpacityMaterial = true;
@@ -138,7 +139,7 @@ export default function Viewport({ view, showGrid = true, modelSpec = null, mode
           materials.forEach(material => {
             material.opacity = material.userData.buildLensBaseOpacity * multiplier;
             material.transparent = material.userData.buildLensBaseTransparent || multiplier < 0.999;
-            material.depthWrite = multiplier >= 0.999 && !material.userData.buildLensBaseTransparent;
+            material.depthWrite = multiplier < 0.999 ? false : material.userData.buildLensBaseDepthWrite;
             material.needsUpdate = true;
           });
         } else if (element.userData.buildLensOpacityMaterial) {
@@ -146,7 +147,7 @@ export default function Viewport({ view, showGrid = true, modelSpec = null, mode
           materials.forEach(material => {
             material.opacity = material.userData.buildLensBaseOpacity;
             material.transparent = material.userData.buildLensBaseTransparent;
-            material.depthWrite = !material.transparent;
+            material.depthWrite = material.userData.buildLensBaseDepthWrite;
             material.needsUpdate = true;
           });
         }
