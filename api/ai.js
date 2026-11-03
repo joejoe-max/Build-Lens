@@ -610,21 +610,6 @@ export default async function handler(req, res) {
           break;
         }
 
-        // Muse Spark's Chat Completions tool_choice supports "auto" only.
-        // Retry once with an explicit correction rather than treating prose
-        // such as "Rebuilding..." as proof that a model was generated.
-        if (turn === 0 && deadline - Date.now() > 8000) {
-          messages.push({
-            role: "assistant",
-            content: plainText || ""
-          });
-          messages.push({
-            role: "user",
-            content: "Your previous response did not call reconstruct_building, so no 3D model exists yet. This request is specifically to generate the actual 3D model from the supplied project documents. Invoke reconstruct_building now with the evidence observations and a schema-valid model. Do not answer with a promise or a text description. If the documents genuinely do not contain enough readable geometry, still invoke the tool with only supported geometry and explicit missing-information observations; never invent dimensions."
-          });
-          continue;
-        }
-
         console.error("BuildLens reconstruction returned no tool call", JSON.stringify({
           finish_reason: choice?.finish_reason || null,
           hasText: Boolean(plainText),
@@ -735,7 +720,9 @@ export default async function handler(req, res) {
         tool_call_count: state.actions.length,
         usage: payload?.usage || null
       }));
-      return res.status(502).json({ error: "Meta AI returned no user-facing answer. Please try again." });
+      sendEvent("error", { error: "Meta AI returned no user-facing answer. Please try again." });
+      closeStream();
+      return;
     }
 
     sendEvent("done", { answer: finalAnswer, actions: state.actions, model: state.model, findings: state.findings });
