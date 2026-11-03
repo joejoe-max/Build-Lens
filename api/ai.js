@@ -43,6 +43,22 @@ const provenance = {
   }
 };
 
+const reconstructionTool = {
+  type: "function",
+  function: {
+    name: "reconstruct_building",
+    description: "Reconstruct the uploaded building in one operation. Pass payload as a JSON-encoded string with shape {observations:[{sourceFile,sourcePage,category,property,value,unit,provenance,description,confidence?}],model:{schemaVersion,id,name,units,levels,grids,structure,metadata,...}}. Record source-page evidence and provide a complete model conforming to BuildLens schema 1.0.0. Use only drawing-supported dimensions. If details are absent, leave structural arrays empty and record missing_information observations; never invent geometry. The application validates the model and renders it in Three.js.",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      required: ["payload"],
+      properties: {
+        payload: { type: "string", minLength: 2, maxLength: 900000, description: "JSON-encoded reconstruction payload containing observations and model." }
+      }
+    }
+  }
+};
+
 const tools = [
   {
     type: "function",
@@ -246,6 +262,21 @@ function findElement(model, elementId) {
 }
 
 function executeTool(name, args, state) {
+  if (name === "reconstruct_building") {
+    if (typeof args?.payload !== "string") return { ok: false, error: "Reconstruction payload must be a JSON-encoded string." };
+    let payload;
+    try { payload = JSON.parse(args.payload); } catch { return { ok: false, error: "Reconstruction payload is not valid JSON." }; }
+    if (!payload || typeof payload !== "object" || Array.isArray(payload) || !payload.model || !Array.isArray(payload.observations)) {
+      return { ok: false, error: "Reconstruction payload must contain observations[] and model." };
+    }
+    if (payload.observations.length) {
+      const evidence = executeTool("record_drawing_observations", { observations: payload.observations }, state);
+      if (!evidence.ok) return evidence;
+    }
+    const rendered = executeTool("render_building_model", { model: payload.model }, state);
+    if (!rendered.ok) return rendered;
+    return { ok: true, modelId: rendered.modelId, elementCounts: rendered.elementCounts, observationsRecorded: state.findings.length };
+  }
   if (args && typeof args.payload === "string") {
     try { args = JSON.parse(args.payload); }
     catch { return { ok: false, error: "The tool payload was not valid JSON. Retry with a valid JSON-encoded payload string." }; }
@@ -402,7 +433,7 @@ function executeTool(name, args, state) {
   return { ok: false, error: "Unknown tool." };
 }
 
-async function callMeta({ apiKey, messages, useTools = true }) {
+async function callMeta({ apiKey, messages, useTools = true, toolsToUse = tools }) {
   const response = await fetch("https://api.meta.ai/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -414,8 +445,8 @@ async function callMeta({ apiKey, messages, useTools = true }) {
       model: "muse-spark-1.3",
       stream: false,
       messages,
-      ...(useTools ? { tools, tool_choice: "auto" } : {}),
-      max_completion_tokens: 8192,
+      ...(useTools ? { tools: toolsToUse, tool_choice: "auto" } : {}),
+      max_completion_tokens: 6144,
       reasoning_effort: "low"
     })
   });
@@ -473,7 +504,7 @@ export default async function handler(req, res) {
     }
   }
   if (attachmentText.length > 60000) attachmentText = attachmentText.slice(0, 60000) + "\n[Document text truncated.]";
-  if (imageParts.length > 3) imageParts.length = 3;
+  if (imageParts.length > 2) imageParts.length = 2;
 
   const apiKey = process.env.META_API_KEY;
   if (!apiKey) return res.status(503).json({ error: "Meta Model API is not configured. Add META_API_KEY in Vercel environment variables." });
@@ -498,10 +529,12 @@ export default async function handler(req, res) {
     let payload = null;
     let finalAnswer = "";
     let completed = false;
+    // New projects use one atomic reconstruction tool to avoid sequential
+    // evidence/model/explanation calls timing out the 60-second function.
+    const requestTools = currentModel ? tools : [reconstructionTool];
 
-    // Bounded tool loop: Meta may request multiple tools in one turn or across turns.
-    for (let turn = 0; turn < 8; turn++) {
-      payload = await callMeta({ apiKey, messages });
+    for (let turn = 0; turn < (currentModel ? 4 : 1); turn++) {
+      payload = await callMeta({ apiKey, messages, toolsToUse: requestTools });
       const choice = payload?.choices?.[0];
       const assistantMessage = choice?.message || {};
       const toolCalls = Array.isArray(assistantMessage.tool_calls) ? assistantMessage.tool_calls : [];
@@ -536,6 +569,17 @@ export default async function handler(req, res) {
           state.toolErrors = state.toolErrors.slice(-12);
         }
         messages.push({ role: "tool", tool_call_id: call.id, content: JSON.stringify(result) });
+      }
+
+      if (!currentModel && state.model && state.actions.some(action => action.type === "model.replace")) {
+        const counts = Object.fromEntries(Object.entries(state.model.structure || {}).map(([key, value]) => [key, Array.isArray(value) ? value.length : 0]));
+        const total = Object.values(counts).reduce((sum, value) => sum + value, 0);
+        const detail = Object.entries(counts).filter(([, count]) => count).map(([category, count]) => count + " " + category).join(", ");
+        finalAnswer = "Drawing interpretation and model validation completed. I recorded " + state.findings.length +
+          " source observations and created a 3D model containing " + total + " structural elements (" + detail +
+          "). The model is now available in the viewport. Dimensions or reinforcement not supported by the uploaded pages remain unverified; this is a drawing reconstruction, not a structural safety certification.";
+        completed = true;
+        break;
       }
     }
 
