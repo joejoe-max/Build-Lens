@@ -103,21 +103,22 @@ export default function Viewport({ view, showGrid = true, modelSpec = null, mode
     const pointer = new THREE.Vector2();
     const visibility = new Map();
     const applyVisibility = () => {
-      const latest = new Map(), opacityActions = new Map();
+      const latest = new Map(), latestElements = new Map(), opacityActions = new Map();
       for (const action of actionsRef.current || []) {
         const category = ACTION_CATEGORY[action?.category] || action?.category;
-        if (action?.type === "model.visibility" && category) latest.set(category, action);
+        if (action?.type === "model.visibility" && category) {
+          if (action.elementIds?.length) action.elementIds.forEach(id => latestElements.set(id, action));
+          else latest.set(category, action);
+        }
         if (action?.type === "model.opacity" && category) opacityActions.set(category, action);
       }
       for (const element of modelElements) {
         const category = element.userData.category;
         const categoryAction = latest.get(category) || latest.get("all");
+        const elementAction = latestElements.get(element.userData.id);
         let visible = isElementVisible(category, viewRef.current);
-        if (categoryAction) {
-          if (categoryAction.elementIds?.length) {
-            if (categoryAction.elementIds.includes(element.userData.id)) visible = categoryAction.visible;
-          } else visible = categoryAction.visible;
-        }
+        if (categoryAction) visible = categoryAction.visible;
+        if (elementAction) visible = elementAction.visible;
         if (isolatedOwnerIdRef.current) { const ownerId = isolatedOwnerIdRef.current; const belongs = element.userData.id === ownerId || element.userData.ownerId === ownerId; visible = belongs && (inspectionModeRef.current === "rebar" ? category === "reinforcement" : true); }
         element.visible = visible && !hiddenIdsRef.current.has(element.userData.id);
         const categoryOpacity = opacityActions.get(category) || opacityActions.get("all");
