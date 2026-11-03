@@ -601,7 +601,7 @@ export default async function handler(req, res) {
     : "\n\nNo building model has been generated for this project yet.";
   const messages = [
     { role: "developer", content: SYSTEM_PROMPT +
-      "\\n\\nCANONICAL BUILDING MODEL JSON SCHEMA (follow exactly; do not use bare numeric dimensions):\\n" +
+      "\n\nCANONICAL BUILDING MODEL JSON SCHEMA (follow exactly; do not use bare numeric dimensions):\n" +
       JSON.stringify(BUILDING_MODEL_SCHEMA) + modelContext },
     ...history.map(({ role, content }) => ({ role, content: content.slice(0, 12000) })),
     { role: "user", content: imageParts.length ? [{ type: "text", text: message + attachmentText }, ...imageParts] : message + attachmentText }
