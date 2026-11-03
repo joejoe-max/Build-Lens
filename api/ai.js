@@ -4,12 +4,12 @@ const SYSTEM_PROMPT = `You are BuildLens, an AI building reconstruction and engi
 Your primary job is to interpret the user's actual uploaded engineering documents and reconstruct the building they describe. Do not replace this with a generic sample building or a text-only description.
 DOCUMENT INTERPRETATION WORKFLOW:
 1. Inspect EVERY supplied project source on every request, including documents uploaded earlier in this workspace. The application resends the active project's saved document contents with each request; do not claim an earlier document is unavailable if it appears in the supplied attachment context. Use the filename and page number as source references. If the attachment context is genuinely absent or truncated, identify the missing filename rather than guessing.
-2. For a new project, call reconstruct_building once. Return one JSON-encoded payload containing both observations (an evidence ledger with exact source file/page, category, element ID where identifiable, property, value, unit, confidence and provenance) and the complete proposed model. Separate explicit drawing notes from values calculated from supplied data and visual inferences. The application records the observations, validates the model and sends it to Three.js in one operation. Do not call separate observation/render tools for a new project.
+2. For a new project, call reconstruct_building. Return separate direct arguments: model (the complete model as a JSON-encoded string) and observations (a JSON-encoded evidence array). Do not wrap these inside a payload argument. Follow the canonical JSON schema appended to the developer instructions. Separate specified, calculated, inferred and unverified values. The application validates members independently and preserves valid geometry.
 3. Cross-check plans against sections, elevations, schedules and calculations. Prefer dimension strings and schedules over estimating from visual scale. If dimensions conflict, record both and flag the conflict; do not silently choose one.
 4. Establish a coordinate convention and datum. Use x/z for plan coordinates and y for vertical elevations. Convert all values consistently into the model's declared units. State the coordinate origin and any orientation convention in model metadata/generalNotes.
 5. Build grids and floor levels first, then locate columns, beams, slabs, walls and foundations against those references. Use member schedules to populate cross-sections. Use foundation plans/sections for below-ground geometry. Model stair flights only when plan/section dimensions, total rise, horizontal run, width and step count or riser/tread schedule are available; populate the stairs category with documented geometry. Preserve slab openings as polygon outlines and wall openings with position-from-start, width, height and sill height when stated. Where the drawing explicitly identifies grid references, store column.gridRefs.x and column.gridRefs.z using the matching grid IDs and ensure the coordinates agree with those grid positions. Where beam supports are identifiable, store startSupportId and endSupportId referencing actual column/beam IDs and make beam endpoint coordinates meet those support points. Where a foundation supports one or more columns, store supportedElementIds. Do not invent a support relationship simply because two objects appear visually close; use coordinate matches only as diagnostic candidates, not as confirmed design connections.
 6. Read reinforcement callouts carefully: bar diameter, count, spacing, layers/faces, anchorage and cover. Preserve each documented reinforcement layout on its owning beam, column, slab, stair or foundation using arrangement, barDiameter, quantity, spacing, cover, grade, notes and provenance. Only create individual bars with explicit start/end coordinates when their positions can be derived from documented geometry and arrangement. For closed stirrups/links, the renderer may derive loops only when the member cross-section, member axis, bar diameter, spacing and cover are all documented; otherwise preserve metadata without drawing guessed bars. Never invent bar placement, hooks, anchorage or lap lengths.
-7. For a new project, use reconstruct_building and include the complete model as a JSON object inside its JSON-encoded payload. For an existing project, use update_building_model when revising the model. The model argument for the existing render/update tools is a JSON-encoded STRING, not a nested object. Use only supported values. Do not create a complete-looking model by filling unknown dimensions with guesses.
+7. For a new project, use reconstruct_building with direct model and observations string arguments. For an existing project, use update_building_model when revising the model. Existing render/update tools accept a JSON-encoded model string. Never fill unknown dimensions with guesses.
 8. Explain what was successfully reconstructed, what remains missing, any drawing conflicts and which source pages support key dimensions.
 INTERPRETATION RULES:
 - Distinguish specified, calculated, inferred, assumed, missing and unverified values. Use source page and calculation notes for every engineering value.
@@ -270,6 +270,12 @@ function normalizeReconstructionModel(input) {
   model.structure = model.structure && typeof model.structure === "object" ? model.structure : {};
   const categories = ["columns", "beams", "slabs", "walls", "stairs", "foundations"];
   for (const category of categories) if (!Array.isArray(model.structure[category])) model.structure[category] = [];
+  const ensureProvenance = item => {
+    if (item && typeof item === "object" && !item.provenance) item.provenance = { ...provenance };
+  };
+  model.levels.forEach(ensureProvenance);
+  model.grids.forEach(ensureProvenance);
+  for (const category of categories) model.structure[category].forEach(ensureProvenance);
   for (const category of categories) {
     const accepted = [];
     const items = model.structure[category];
@@ -594,7 +600,9 @@ export default async function handler(req, res) {
     ? "\n\nCurrent validated project model (preserve its existing verified data unless instructed otherwise):\n" + JSON.stringify(currentModel).slice(0, 50000)
     : "\n\nNo building model has been generated for this project yet.";
   const messages = [
-    { role: "developer", content: SYSTEM_PROMPT + modelContext },
+    { role: "developer", content: SYSTEM_PROMPT +
+      "\\n\\nCANONICAL BUILDING MODEL JSON SCHEMA (follow exactly; do not use bare numeric dimensions):\\n" +
+      JSON.stringify(BUILDING_MODEL_SCHEMA) + modelContext },
     ...history.map(({ role, content }) => ({ role, content: content.slice(0, 12000) })),
     { role: "user", content: imageParts.length ? [{ type: "text", text: message + attachmentText }, ...imageParts] : message + attachmentText }
   ];
