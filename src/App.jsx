@@ -517,7 +517,15 @@ export default function App() {
               return next.slice(-40);
             });
           }
-          if (result.findings?.length) setDrawingFindings(current => [...current, ...result.findings].slice(-500));
+          if (result.findings?.length) setDrawingFindings(current => {
+            const unique = new Map(current.map(item => [
+              [item.sourceFile, item.sourcePage, item.elementId || "", item.property, String(item.value)].join("|"), item
+            ]));
+            for (const item of result.findings) {
+              unique.set([item.sourceFile, item.sourcePage, item.elementId || "", item.property, String(item.value)].join("|"), item);
+            }
+            return [...unique.values()].slice(-500);
+          });
         },
         onDelta: streamed => {
           const next = [...messagesRef.current];
