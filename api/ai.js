@@ -47,7 +47,7 @@ const reconstructionTool = {
   type: "function",
   function: {
     name: "reconstruct_building",
-    description: "MANDATORY for every first-time 3D reconstruction. Return the complete canonical BuildLens model as a JSON-encoded string in model, and source observations as a JSON-encoded array in observations. The model MUST use schemaVersion 1.0.0, id, name, units (m/mm/cm/ft), levels with elevation {value,provenance:{status}}, grids, structure arrays (columns,beams,slabs,walls,stairs,foundations), and metadata.createdFrom. Every dimension MUST be {value:number,provenance:{status}}; coordinates are plain numeric x/y/z. Provenance status is specified, calculated, inferred, assumed, missing, or unverified. Do not invent geometry or dimensions. Include every supported member; partial valid geometry is better than discarding the whole model. Exact canonical schema: " + JSON.stringify(BUILDING_MODEL_SCHEMA),
+    description: "MANDATORY for every first-time 3D reconstruction. Return the complete canonical BuildLens model as a JSON-encoded string in model, and source observations as a JSON-encoded array in observations. The model MUST use schemaVersion 1.0.0, id, name, units (m/mm/cm/ft), levels with elevation {value,provenance:{status}}, grids, structure arrays (columns,beams,slabs,walls,stairs,foundations,roofs), and metadata.createdFrom. Every dimension MUST be {value:number,provenance:{status}}; coordinates are plain numeric x/y/z. Provenance status is specified, calculated, inferred, assumed, missing, or unverified. Do not invent geometry or dimensions. Include every supported member; partial valid geometry is better than discarding the whole model. Exact canonical schema: " + JSON.stringify(BUILDING_MODEL_SCHEMA),
     parameters: {
       type: "object",
       additionalProperties: false,
@@ -102,7 +102,7 @@ const tools = [
     type: "function",
     function: {
       name: "render_building_model",
-      description: "Create the initial complete structured building model from the uploaded drawings and calculations. Call this when the user asks to generate or reconstruct the building in 3D. Include all supported foundations, columns, beams, slabs, walls, grids, levels and reinforcement. Do not invent missing data.",
+      description: "Create the initial complete structured building model from the uploaded drawings and calculations. Call this when the user asks to generate or reconstruct the building in 3D. Include all supported foundations, columns, beams, slabs, walls, stairs, roofs, grids, levels and reinforcement. Do not invent missing data.",
       parameters: {
         type: "object",
         additionalProperties: false,
@@ -164,7 +164,7 @@ const tools = [
     type: "function",
     function: {
       name: "generate_reinforcement_layout",
-      description: "Add a reinforcement layout to an existing beam, column, slab, wall or foundation. Use only reinforcement details stated in the drawings or derived by an explicitly described calculation. Do not invent bar sizes, spacing, quantities or cover. Include provenance for every supplied value.",
+      description: "Add a reinforcement layout to an existing beam, column, slab, wall, stair or foundation. Use only reinforcement details stated in the drawings or derived by an explicitly described calculation. Do not invent bar sizes, spacing, quantities or cover. Include provenance for every supplied value.",
       parameters: {
         type: "object",
         additionalProperties: false,
@@ -172,6 +172,7 @@ const tools = [
         properties: {
           elementId: { type: "string", minLength: 1 },
           arrangement: { type: "string", enum: ["longitudinal", "transverse", "top", "bottom", "both_faces", "closed_stirrups", "links", "mesh", "custom"] },
+          barMark: { type: "string" },
           barDiameter: { type: "object", additionalProperties: false, required: ["value", "provenance"], properties: { value: { type: "number", exclusiveMinimum: 0 }, provenance } },
           quantity: { type: "integer", minimum: 1 },
           spacing: { type: "object", additionalProperties: false, required: ["value", "provenance"], properties: { value: { type: "number", exclusiveMinimum: 0 }, provenance } },
@@ -467,6 +468,7 @@ function executeTool(name, args, state) {
     target.reinforcement = Array.isArray(target.reinforcement) ? target.reinforcement : [];
     const layout = {
       arrangement: args.arrangement,
+      ...(args.barMark ? { barMark: args.barMark } : {}),
       barDiameter,
       ...(args.quantity !== undefined ? { quantity: args.quantity } : {}),
       ...(args.spacing ? { spacing: args.spacing } : {}),
@@ -793,7 +795,7 @@ export default async function handler(req, res) {
       if (!currentModel && state.model && state.actions.some(action => action.type === "model.replace")) {
         const counts = Object.fromEntries(Object.entries(state.model.structure || {}).map(([key, value]) => [key, Array.isArray(value) ? value.length : 0]));
         const total = Object.values(counts).reduce((sum, value) => sum + value, 0);
-        const geometryCount = ["columns", "beams", "slabs", "walls", "stairs", "foundations"]
+        const geometryCount = ["columns", "beams", "slabs", "walls", "stairs", "foundations", "roofs"]
           .reduce((sum, key) => sum + (counts[key] || 0), 0);
         const detail = Object.entries(counts).filter(([, count]) => count).map(([category, count]) => count + " " + category).join(", ");
         if (validateBuildingModel(state.model).valid) {
