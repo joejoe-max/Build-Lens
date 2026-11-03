@@ -439,9 +439,8 @@ function executeTool(name, args, state) {
 async function callMeta({ apiKey, messages, useTools = true, toolsToUse = tools, timeoutMs = 45000 }) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), Math.max(1000, timeoutMs));
-  let response;
   try {
-    response = await fetch("https://api.meta.ai/v1/chat/completions", {
+    const response = await fetch("https://api.meta.ai/v1/chat/completions", {
       method: "POST",
       headers: {
         Authorization: "Bearer " + apiKey,
@@ -458,6 +457,23 @@ async function callMeta({ apiKey, messages, useTools = true, toolsToUse = tools,
         reasoning_effort: "low"
       })
     });
+
+    // Keep the abort timer active until the complete response body is read.
+    const raw = await response.text();
+    let payload;
+    try { payload = raw ? JSON.parse(raw) : null; }
+    catch { throw new Error("Meta AI returned an unreadable response."); }
+
+    if (!response.ok) {
+      const providerMessage = payload?.error?.message || payload?.message;
+      console.error("Meta API request failed:", response.status, String(providerMessage || "").slice(0, 400));
+      const error = new Error(response.status === 401 || response.status === 403
+        ? "Meta API authentication failed. Check META_API_KEY in Vercel."
+        : "Meta AI request failed (HTTP " + response.status + "). " + (providerMessage || "Please try again."));
+      error.status = response.status >= 500 ? 502 : response.status;
+      throw error;
+    }
+    return payload;
   } catch (error) {
     if (error?.name === "AbortError") {
       const timeout = new Error("Meta AI took too long to interpret the drawings. The request was stopped before Vercel's execution limit; no model was reported as complete.");
@@ -468,22 +484,6 @@ async function callMeta({ apiKey, messages, useTools = true, toolsToUse = tools,
   } finally {
     clearTimeout(timer);
   }
-
-  const raw = await response.text();
-  let payload;
-  try { payload = raw ? JSON.parse(raw) : null; }
-  catch { throw new Error("Meta AI returned an unreadable response."); }
-
-  if (!response.ok) {
-    const providerMessage = payload?.error?.message || payload?.message;
-    console.error("Meta API request failed:", response.status, String(providerMessage || "").slice(0, 400));
-    const error = new Error(response.status === 401 || response.status === 403
-      ? "Meta API authentication failed. Check META_API_KEY in Vercel."
-      : "Meta AI request failed (HTTP " + response.status + "). " + (providerMessage || "Please try again."));
-    error.status = response.status >= 500 ? 502 : response.status;
-    throw error;
-  }
-  return payload;
 }
 
 export default async function handler(req, res) {
