@@ -327,7 +327,6 @@ export default function App() {
   const [projectAttachments, setProjectAttachments] = useState([]);
   const [attachmentsHydrated, setAttachmentsHydrated] = useState(false);
   const [modelSpec, setModelSpec] = useState(null);
-  const [modelActions, setModelActions] = useState([]);
   const [drawingFindings, setDrawingFindings] = useState([]);
   const [focusedFinding, setFocusedFinding] = useState(null);
   const messagesRef = useRef([]);
