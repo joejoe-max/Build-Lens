@@ -27,7 +27,7 @@ MODEL AND TOOL BEHAVIOUR:
 Use reconstruct_building for a newly interpreted building. Use update_building_model when revising an existing model. Use set_model_visibility for display requests and inspect_model_element for element details. A successful model tool call updates project model data; the application handles Three.js rendering. Do not claim a viewport update unless confirmed.
 Keep the answer practical. Summarize extracted evidence, model contents, uncertainties and next required information.`;
 
-export const config = { maxDuration: 60 };
+export const config = { maxDuration: 300 };
 
 const provenance = {
   type: "object",
@@ -548,9 +548,9 @@ export default async function handler(req, res) {
     let finalAnswer = "";
     let completed = false;
     const startedAt = Date.now();
-    const deadline = startedAt + 55000;
+    const deadline = startedAt + 285000;
     const requestTools = currentModel ? tools : [reconstructionTool];
-    const maxTurns = currentModel ? 4 : 2;
+    const maxTurns = currentModel ? 3 : 1;
 
     for (let turn = 0; turn < maxTurns; turn++) {
       const remainingMs = deadline - Date.now();
