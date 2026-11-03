@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   createEmptyBuildingModel,
   validateBuildingModel,
+  analyzeStructuralConnectivity,
 } from "../src/domain/buildingModel.js";
 
 test("empty project model satisfies the canonical contract", () => {
@@ -60,4 +61,49 @@ test("rejects non-finite coordinates", () => {
     provenance: { status: "specified" },
   });
   assert.equal(validateBuildingModel(model).valid, false);
+});
+
+test("validates pitched roof geometry and required rise metadata", () => {
+  const model = createEmptyBuildingModel();
+  const provenance = { status: "specified" };
+  model.structure.roofs.push({
+    id: "R1",
+    type: "gable",
+    outline: [{ x: 0, z: 0 }, { x: 8, z: 0 }, { x: 8, z: 6 }, { x: 0, z: 6 }],
+    eavesElevation: { value: 6, provenance },
+    rise: { value: 2, provenance },
+    ridgeAxis: "x",
+    provenance
+  });
+  assert.equal(validateBuildingModel(model).valid, true);
+  delete model.structure.roofs[0].rise;
+  assert.equal(validateBuildingModel(model).valid, false);
+});
+
+test("flags columns offset from supplied grids and reinforcement without a bar mark", () => {
+  const model = createEmptyBuildingModel();
+  const provenance = { status: "specified" };
+  model.grids = [
+    { id: "GX1", axis: "x", label: "1", position: 0, provenance },
+    { id: "GZ1", axis: "z", label: "A", position: 0, provenance }
+  ];
+  model.structure.columns.push({
+    id: "C1",
+    base: { x: 0.5, y: 0, z: 0.5 },
+    top: { x: 0.5, y: 3, z: 0.5 },
+    width: { value: 0.3, provenance },
+    depth: { value: 0.3, provenance },
+    provenance,
+    reinforcement: [{
+      arrangement: "longitudinal",
+      barDiameter: { value: 0.016, provenance },
+      spacing: { value: 0.15, provenance },
+      cover: { value: 0.04, provenance },
+      provenance
+    }]
+  });
+  assert.equal(validateBuildingModel(model).valid, true);
+  const warnings = analyzeStructuralConnectivity(model).warnings;
+  assert.ok(warnings.some(warning => warning.code === "off_grid_column" && warning.elementId === "C1"));
+  assert.ok(warnings.some(warning => warning.code === "missing_bar_mark" && warning.elementId === "C1"));
 });
