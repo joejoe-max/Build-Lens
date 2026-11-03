@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import * as THREE from "three";
 import { createBuildingModel } from "../src/three/BuildingModel.js";
+import { detectDrawingConflicts } from "../src/domain/drawingCoordination.js";
 import {
   createEmptyBuildingModel,
   validateBuildingModel,
@@ -146,4 +147,23 @@ test("renderer creates roof meshes and derives slab reinforcement from documente
     if (Array.isArray(object.material)) object.material.forEach(material => material.dispose());
     else object.material?.dispose?.();
   });
+});
+
+test("detects architectural versus structural dimensions that disagree", () => {
+  const observations = [
+    { sourceFile: "Architectural A101.pdf", sourcePage: 2, discipline: "architectural", category: "column", elementId: "C1", property: "width", value: 0.3, unit: "m", provenance: "specified", description: "Architectural column width" },
+    { sourceFile: "Structural S201.pdf", sourcePage: 4, discipline: "structural", category: "column", elementId: "C1", property: "width", value: 350, unit: "mm", provenance: "specified", description: "Structural column width" }
+  ];
+  const conflicts = detectDrawingConflicts(observations);
+  assert.equal(conflicts.length, 1);
+  assert.equal(conflicts[0].elementId, "C1");
+  assert.equal(conflicts[0].category, "conflict");
+});
+
+test("does not flag matching architectural and structural dimensions", () => {
+  const observations = [
+    { sourceFile: "A101.pdf", sourcePage: 1, discipline: "architectural", category: "column", elementId: "C2", property: "width", value: 300, unit: "mm" },
+    { sourceFile: "S201.pdf", sourcePage: 2, discipline: "structural", category: "column", elementId: "C2", property: "width", value: 0.3, unit: "m" }
+  ];
+  assert.equal(detectDrawingConflicts(observations).length, 0);
 });
