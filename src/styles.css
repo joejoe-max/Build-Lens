@@ -91,3 +91,12 @@
 
 .chat-model-card>p{margin:0;padding:8px 12px;color:#929da5;font-size:10px;line-height:1.5;border-top:1px solid #343b40}
 @media(max-width:760px){.chat-model-viewport{height:230px}}
+
+/* Stage 4: selectable evidence and compact chat-preview inspection controls. */
+.evidence-row-selectable{width:100%;border:0;background:transparent;color:inherit;text-align:left;cursor:pointer}
+.evidence-row-selectable:hover{background:#242b30}
+.chat-model-viewport .viewport-inspection-tools{left:auto;right:8px;top:8px;transform:none;width:auto;max-width:calc(100% - 16px);align-items:flex-end}
+.chat-model-viewport .inspection-toggle{display:block}
+.chat-model-viewport .inspection-tools-content{display:none;width:min(340px,calc(100vw - 32px));max-height:190px;overflow:auto;padding:7px;background:rgba(20,24,27,.97);border:1px solid #39434a;border-radius:7px;box-shadow:0 5px 18px #0008}
+.chat-model-viewport .viewport-inspection-tools.tools-open .inspection-tools-content{display:flex}
+.chat-model-viewport .viewport-inspection-tools .inspection-row{flex-wrap:wrap}
