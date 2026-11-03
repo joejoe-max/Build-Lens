@@ -567,24 +567,32 @@ export default async function handler(req, res) {
 
   let attachmentText = "";
   const imageParts = [];
-  for (const item of attachments) {
+  const MAX_IMAGES = 10;
+  const MAX_DOCUMENT_TEXT = 480000;
+  for (const [index, item] of attachments.entries()) {
     if (!item || typeof item.name !== "string" || typeof item.type !== "string") continue;
     if (item.kind === "text" && typeof item.content === "string") {
-      attachmentText += "\n\n[Attached document: " + item.name + "]\n" + item.content.slice(0, 45000);
-    } else if (item.kind === "image" && typeof item.dataUrl === "string" &&
-      /^data:image\/(jpeg|png|webp);base64,/.test(item.dataUrl) && item.dataUrl.length <= 1500000) {
+      const remaining = Math.max(0, MAX_DOCUMENT_TEXT - attachmentText.length);
+      const content = item.content.slice(0, Math.min(120000, remaining));
+      attachmentText += "\n\n[Project document " + (index + 1) + ": " + item.name + "]\n" + content;
+    }
+    if (item.kind === "image" && typeof item.dataUrl === "string" &&
+      /^data:image\/(jpeg|png|webp);base64,/.test(item.dataUrl) && item.dataUrl.length <= 400000 &&
+      imageParts.length < MAX_IMAGES) {
       imageParts.push({ type: "image_url", image_url: { url: item.dataUrl, detail: "high" } });
     }
-    if (Array.isArray(item.pageImages)) {
-      for (const page of item.pageImages.slice(0, 2)) {
-        if (typeof page?.dataUrl === "string" && /^data:image\/(jpeg|png|webp);base64,/.test(page.dataUrl) && page.dataUrl.length <= 850000) {
+    if (Array.isArray(item.pageImages) && imageParts.length < MAX_IMAGES) {
+      for (const page of item.pageImages) {
+        if (imageParts.length >= MAX_IMAGES) break;
+        if (typeof page?.dataUrl === "string" &&
+          /^data:image\/(jpeg|png|webp);base64,/.test(page.dataUrl) && page.dataUrl.length <= 300000) {
+          attachmentText += "\n[Visual sheet supplied from " + item.name + ", page " + (Number.isInteger(page.pageNumber) ? page.pageNumber : "unknown") + "]";
           imageParts.push({ type: "image_url", image_url: { url: page.dataUrl, detail: "high" } });
         }
       }
     }
   }
-  if (attachmentText.length > 60000) attachmentText = attachmentText.slice(0, 60000) + "\n[Document text truncated.]";
-  if (imageParts.length > 2) imageParts.length = 2;
+  if (attachmentText.length > MAX_DOCUMENT_TEXT) attachmentText = attachmentText.slice(0, MAX_DOCUMENT_TEXT) + "\n[Document text truncated after the shared evidence budget.]";
 
   const apiKey = process.env.META_API_KEY;
   if (!apiKey) return res.status(503).json({ error: "Meta Model API is not configured. Add META_API_KEY in Vercel environment variables." });
