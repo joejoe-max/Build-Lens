@@ -191,14 +191,97 @@ function createFromSpec(scene, model) {
   return { building: group, elements, connectivity };
 }
 
-// Placeholder only: shown until a validated project-specific model is supplied.
+// Landing-page demonstration geometry. Reinforcement is illustrative only,
+// not a design or a substitute for project-specific bar schedules.
 function createSample(scene) {
-  const group=new THREE.Group(); scene.add(group); const elements=[];
-  const add=(id,size,pos,material,category)=>{const mesh=new THREE.Mesh(new THREE.BoxGeometry(...size),material);mesh.position.set(...pos);addMesh(group,elements,mesh,id,category);};
-  const xs=[-3,0,3],zs=[-2.5,0,2.5],ys=[.18,3.18,6.18];
-  ys.forEach((y,i)=>{add("Sample slab "+i,[6.7,.16,5.7],[0,y,0],MATERIALS.slab,"slabs");if(i<2){xs.forEach(x=>zs.forEach(z=>add("Sample column",[.24,2.84,.24],[x,y+1.5,z],MATERIALS.concrete,"columns")));zs.forEach(z=>add("Sample beam",[6,.22,.22],[0,ys[i+1]-.19,z],MATERIALS.beam,"beams"));xs.forEach(x=>add("Sample beam",[.22,.22,5],[x,ys[i+1]-.19,0],MATERIALS.beam,"beams"));}});
-  xs.forEach(x=>zs.forEach(z=>add("Sample footing",[.95,.35,.95],[x,-.42,z],MATERIALS.foundation,"foundations")));
-  return {building:group,elements};
+  const group = new THREE.Group();
+  group.name = "BuildLens illustrative sample";
+  scene.add(group);
+  const elements = [];
+  const add = (id, size, pos, material, category) => {
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(...size), material);
+    mesh.position.set(...pos);
+    addMesh(group, elements, mesh, id, category);
+  };
+  const addBar = (a, b, id, owner, type, diameter = 0.016) => {
+    addCylinderBetween(
+      group, elements, new THREE.Vector3(...a), new THREE.Vector3(...b),
+      diameter, id,
+      { ownerId: owner, ownerName: owner, reinforcementType: type, provenance: "illustrative demo geometry" }
+    );
+  };
+  const xs = [-3, 0, 3], zs = [-2.5, 0, 2.5], ys = [0.18, 3.18, 6.18];
+
+  ys.forEach((y, level) => {
+    add("Sample slab " + level, [6.7, 0.16, 5.7], [0, y, 0], MATERIALS.slab, "slabs");
+
+    // Two orthogonal layers of slab bars, placed just inside the top face.
+    for (let z = -2.5; z <= 2.501; z += 0.35) {
+      addBar([-3.1, y + 0.045, z], [3.1, y + 0.045, z],
+        `sample-slab-${level}-x-${z.toFixed(2)}`, "Sample slab " + level, "slab-main");
+    }
+    for (let x = -3; x <= 3.001; x += 0.35) {
+      addBar([x, y + 0.025, -2.6], [x, y + 0.025, 2.6],
+        `sample-slab-${level}-z-${x.toFixed(2)}`, "Sample slab " + level, "slab-distribution");
+    }
+
+    if (level < 2) {
+      xs.forEach(x => zs.forEach(z => {
+        const owner = `Sample column ${level}-${x}-${z}`;
+        const base = y + 0.12, top = ys[level + 1] - 0.12;
+        add(owner, [0.24, 2.84, 0.24], [x, y + 1.5, z], MATERIALS.concrete, "columns");
+
+        // Four longitudinal bars and rectangular ties.
+        for (const dx of [-0.065, 0.065]) for (const dz of [-0.065, 0.065]) {
+          addBar([x + dx, base, z + dz], [x + dx, top, z + dz],
+            owner + "-main-" + dx + "-" + dz, owner, "column-longitudinal", 0.014);
+        }
+        for (let tieY = base + 0.12, tie = 0; tieY < top; tieY += 0.3, tie++) {
+          const left = x - 0.075, right = x + 0.075, front = z - 0.075, back = z + 0.075;
+          const corners = [[left,tieY,front],[right,tieY,front],[right,tieY,back],[left,tieY,back]];
+          corners.forEach((point, side) => addBar(point, corners[(side + 1) % 4],
+            owner + "-tie-" + tie + "-" + side, owner, "column-tie", 0.009));
+        }
+      }));
+
+      // Beam longitudinal bars and regularly spaced illustrative links.
+      zs.forEach(z => {
+        const owner = `Sample beam X ${level}-${z}`;
+        add(owner, [6, 0.22, 0.22], [0, ys[level + 1] - 0.19, z], MATERIALS.beam, "beams");
+        for (const dz of [-0.065, 0.065]) for (const dy of [-0.055, 0.055]) {
+          addBar([-2.85, ys[level + 1] - 0.19 + dy, z + dz],
+            [2.85, ys[level + 1] - 0.19 + dy, z + dz],
+            owner + "-main-" + dy + "-" + dz, owner, "beam-longitudinal", 0.014);
+        }
+        for (let x = -2.7, link = 0; x <= 2.701; x += 0.3, link++) {
+          const y0 = ys[level + 1] - 0.19, z0 = z;
+          const corners = [[x,y0-0.065,z0-0.065],[x,y0+0.065,z0-0.065],[x,y0+0.065,z0+0.065],[x,y0-0.065,z0+0.065]];
+          corners.forEach((point, side) => addBar(point, corners[(side + 1) % 4],
+            owner + "-link-" + link + "-" + side, owner, "beam-link", 0.009));
+        }
+      });
+      xs.forEach(x => {
+        const owner = `Sample beam Z ${level}-${x}`;
+        add(owner, [0.22, 0.22, 5], [x, ys[level + 1] - 0.19, 0], MATERIALS.beam, "beams");
+        for (const dx of [-0.065, 0.065]) for (const dy of [-0.055, 0.055]) {
+          addBar([x + dx, ys[level + 1] - 0.19 + dy, -2.35],
+            [x + dx, ys[level + 1] - 0.19 + dy, 2.35],
+            owner + "-main-" + dy + "-" + dx, owner, "beam-longitudinal", 0.014);
+        }
+        for (let z = -2.2, link = 0; z <= 2.201; z += 0.3, link++) {
+          const y0 = ys[level + 1] - 0.19, x0 = x;
+          const corners = [[x0-0.065,y0-0.065,z],[x0+0.065,y0-0.065,z],[x0+0.065,y0+0.065,z],[x0-0.065,y0+0.065,z]];
+          corners.forEach((point, side) => addBar(point, corners[(side + 1) % 4],
+            owner + "-link-" + link + "-" + side, owner, "beam-link", 0.009));
+        }
+      });
+    }
+  });
+
+  xs.forEach(x => zs.forEach(z =>
+    add("Sample footing", [0.95, 0.35, 0.95], [x, -0.42, z], MATERIALS.foundation, "foundations")
+  ));
+  return { building: group, elements };
 }
 export function createBuildingModel(scene, modelSpec = null) {
   return modelSpec ? createFromSpec(scene, modelSpec) : createSample(scene);
