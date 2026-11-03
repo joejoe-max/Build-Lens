@@ -171,6 +171,7 @@ export default function App() {
   const [modelSpec, setModelSpec] = useState(null);
   const [modelActions, setModelActions] = useState([]);
   const [drawingFindings, setDrawingFindings] = useState([]);
+  const [focusedFinding, setFocusedFinding] = useState(null);
   const messagesRef = useRef([]);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
@@ -332,6 +333,21 @@ export default function App() {
               setMessages(next);
             }
           }
+          const workspaceActions = (result.actions || []).filter(action =>
+            action?.type === "model.visibility" || action?.type === "model.opacity");
+          if (workspaceActions.length) {
+            setModelActions(current => {
+              let next = [...current];
+              for (const action of workspaceActions) {
+                const scope = (action.elementIds || []).slice().sort().join(",");
+                next = next.filter(existing => !(existing.type === action.type &&
+                  existing.category === action.category &&
+                  (existing.elementIds || []).slice().sort().join(",") === scope));
+                next.push(action);
+              }
+              return next.slice(-40);
+            });
+          }
           if (result.findings?.length) setDrawingFindings(current => [...current, ...result.findings].slice(-500));
         },
         onDelta: streamed => {
@@ -393,13 +409,13 @@ export default function App() {
           <ModelControls showGrid={showGrid} onToggleGrid={() => setShowGrid(value => !value)} onReset={() => document.querySelector(".viewport-canvas")?.dispatchEvent(new CustomEvent("buildlens-reset"))} />
         </div>
         <div className="viewport-wrap">
-          <Viewport view={view} showGrid={showGrid} modelSpec={modelSpec} modelActions={[]} />
+          <Viewport view={view} showGrid={showGrid} modelSpec={modelSpec} modelActions={modelActions} findings={drawingFindings} focusElementId={focusedFinding?.id} focusRequest={focusedFinding?.request} />
           <div className="viewport-badge"><span className="live-dot" /> {modelSpec ? "PROJECT MODEL DATA RECEIVED" : "CONCEPT MODEL"} <span className="badge-divider">/</span> {modelSpec ? "VALIDATED" : "DEMO DATA"}</div>
           <div className="viewport-instructions"><span>DRAG TO ORBIT</span><i /><span>RIGHT-DRAG / TWO-FINGER DRAG TO PAN</span><i /><span>SCROLL / PINCH TO ZOOM</span></div>
           <div className="orientation-cube" aria-label="View orientation"><span className="cube-top">Y</span><span className="cube-front">Z</span><span className="cube-side">X</span></div>
         </div>
         <ModelViewTabs view={view} onViewChange={setView} />
-        <AssumptionPanel open={assumptionsOpen} onToggle={() => setAssumptionsOpen(value => !value)} modelSpec={modelSpec} findings={drawingFindings} />
+        <AssumptionPanel open={assumptionsOpen} onToggle={() => setAssumptionsOpen(value => !value)} modelSpec={modelSpec} findings={drawingFindings} onSelectFinding={item => item.elementId && setFocusedFinding({ id: item.elementId, request: Date.now() })} />
       </section>
       <EngineeringPanel
         open={mobilePanel} onClose={() => setMobilePanel(false)}
