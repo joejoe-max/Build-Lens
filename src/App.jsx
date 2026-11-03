@@ -111,7 +111,7 @@ export default function App() {
   const messagesRef = useRef([]);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState(false);\n  const [busyLabel, setBusyLabel] = useState("BuildLens is responding…");
   const [mobilePanel, setMobilePanel] = useState(false);
   const [hasStartedChat, setHasStartedChat] = useState(false);
   const [showGrid, setShowGrid] = useState(true);
@@ -233,7 +233,7 @@ export default function App() {
         history,
         attachments: requestAttachments,
         currentModel: modelSpec,
-        onActions: result => {
+        onStatus: status => setBusyLabel(status),\n        onActions: result => {
           if (result.model) {
             setModelSpec(result.model);
             // Keep an immutable model snapshot on the assistant message that
@@ -267,7 +267,7 @@ export default function App() {
         messagesRef.current = next;
         return next;
       });
-    } finally { setBusy(false); }
+    } finally { setBusy(false); setBusyLabel("BuildLens is responding…"); }
   };
 
   const exportWorkspace = () => {
@@ -319,7 +319,7 @@ export default function App() {
       <EngineeringPanel
         open={mobilePanel} onClose={() => setMobilePanel(false)}
         files={files} onAddFiles={addFiles} onRemoveFile={removeFile}
-        messages={messages} busy={busy} input={input} onInputChange={setInput}
+        messages={messages} busy={busy} busyLabel={busyLabel} input={input} onInputChange={setInput}
         onSend={sendMessage} onClear={clearWorkspace} onExport={exportWorkspace}
         onNewChat={startNewChat} fileInputRef={fileInputRef} pendingAttachments={pendingAttachments}
       />
