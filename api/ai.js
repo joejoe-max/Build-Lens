@@ -269,6 +269,9 @@ function executeTool(name, args, state) {
     if (!payload || typeof payload !== "object" || Array.isArray(payload) || !payload.model || !Array.isArray(payload.observations)) {
       return { ok: false, error: "Reconstruction payload must contain observations[] and model." };
     }
+    const geometryCategories = ["columns", "beams", "slabs", "walls", "stairs", "foundations"];
+    const geometryCount = geometryCategories.reduce((sum, key) => sum + (Array.isArray(payload.model.structure?.[key]) ? payload.model.structure[key].length : 0), 0);
+    if (geometryCount === 0) return { ok: false, error: "No supported building geometry was reconstructed from the supplied evidence. Do not return an empty or invented model; identify the unreadable or missing drawing information and try again with clearer source pages." };
     if (payload.observations.length) {
       const evidence = executeTool("record_drawing_observations", { observations: payload.observations }, state);
       if (!evidence.ok) return evidence;
