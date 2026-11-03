@@ -524,25 +524,6 @@ export default function App() {
               setMessages(next);
             }
           }
-          const workspaceActions = (result.actions || []).filter(action =>
-            action?.type === "model.visibility" || action?.type === "model.opacity");
-          if (workspaceActions.length) {
-            setModelActions(current => {
-              let next = [...current];
-              for (const action of workspaceActions) {
-                const scope = (action.elementIds || []).slice().sort().join(",");
-                if (action.category === "all") next = next.filter(existing => existing.type !== action.type);
-                else if (action.elementIds?.length) {
-                  const ids = new Set(action.elementIds);
-                  next = next.filter(existing => !(existing.type === action.type &&
-                    existing.category === action.category &&
-                    (existing.elementIds || []).some(id => ids.has(id))));
-                } else next = next.filter(existing => !(existing.type === action.type && existing.category === action.category));
-                next.push(action);
-              }
-              return next.slice(-40);
-            });
-          }
           if (result.findings?.length) setDrawingFindings(current => {
             const unique = new Map(current.map(item => [
               [item.sourceFile, item.sourcePage, item.elementId || "", item.property, String(item.value)].join("|"), item
@@ -612,7 +593,7 @@ export default function App() {
           <ModelControls showGrid={showGrid} onToggleGrid={() => setShowGrid(value => !value)} onReset={() => document.querySelector(".viewport-canvas")?.dispatchEvent(new CustomEvent("buildlens-reset"))} />
         </div>
         <div className="viewport-wrap">
-          <Viewport view={view} showGrid={showGrid} modelSpec={modelSpec} modelActions={modelActions} findings={drawingFindings} focusElementId={focusedFinding?.id} focusRequest={focusedFinding?.request} />
+          <Viewport view={view} showGrid={showGrid} modelSpec={modelSpec} modelActions={[]} findings={drawingFindings} focusElementId={focusedFinding?.id} focusRequest={focusedFinding?.request} />
           <div className="viewport-badge"><span className="live-dot" /> {modelSpec ? "PROJECT MODEL DATA RECEIVED" : "CONCEPT MODEL"} <span className="badge-divider">/</span> {modelSpec ? "VALIDATED" : "DEMO DATA"}</div>
           <div className="viewport-instructions"><span>DRAG TO ORBIT</span><i /><span>RIGHT-DRAG / TWO-FINGER DRAG TO PAN</span><i /><span>SCROLL / PINCH TO ZOOM</span></div>
           <div className="orientation-cube" aria-label="View orientation"><span className="cube-top">Y</span><span className="cube-front">Z</span><span className="cube-side">X</span></div>
