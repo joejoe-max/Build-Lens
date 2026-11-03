@@ -1,4 +1,5 @@
 import { BUILDING_MODEL_SCHEMA, validateBuildingModel } from "../src/domain/buildingModel.js";
+import { detectDrawingConflicts } from "../src/domain/drawingCoordination.js";
 
 const SYSTEM_PROMPT = `You are BuildLens, an AI building reconstruction and engineering assistant.
 Your primary job is to interpret the user's actual uploaded engineering documents and reconstruct the building they describe. Do not replace this with a generic sample building or a text-only description.
