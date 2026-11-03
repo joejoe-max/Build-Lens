@@ -227,7 +227,7 @@ const tools = [
 // still validates each decoded payload before mutating project state.
 for (const tool of tools) {
   const original = tool.function.parameters;
-  tool.function.description += "\\n\\nPass one argument named payload: a JSON-encoded string containing the complete arguments object. Payload shape: " + JSON.stringify(original);
+  tool.function.description += "\n\nPass one argument named payload: a JSON-encoded string containing the complete arguments object. Payload shape: " + JSON.stringify(original);
   tool.function.parameters = {
     type: "object",
     additionalProperties: false,
@@ -553,10 +553,10 @@ export default async function handler(req, res) {
   res.flushHeaders?.();
   let responseClosed = false;
   const sendEvent = (event, data) => {
-    if (!responseClosed && !res.destroyed) res.write("event: " + event + "\\ndata: " + JSON.stringify(data) + "\\n\\n");
+    if (!responseClosed && !res.destroyed) res.write("event: " + event + "\ndata: " + JSON.stringify(data) + "\n\n");
   };
   const heartbeat = setInterval(() => {
-    if (!responseClosed && !res.destroyed) res.write(": keep-alive\\n\\n");
+    if (!responseClosed && !res.destroyed) res.write(": keep-alive\n\n");
   }, 12000);
   const closeStream = () => {
     if (responseClosed) return;
@@ -697,8 +697,8 @@ export default async function handler(req, res) {
 
     if (!completed && currentModel) {
       const failureContext = state.toolErrors.length
-        ? "\\nTool execution failures: " + JSON.stringify(state.toolErrors).slice(0, 12000)
-        : "\\nThe tool-call sequence reached its configured turn limit. Completed actions: " + JSON.stringify(state.actions.map(action => action.type));
+        ? "\nTool execution failures: " + JSON.stringify(state.toolErrors).slice(0, 12000)
+        : "\nThe tool-call sequence reached its configured turn limit. Completed actions: " + JSON.stringify(state.actions.map(action => action.type));
       try {
         const closing = await callMeta({
           apiKey,
