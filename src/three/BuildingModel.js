@@ -20,7 +20,7 @@ function addMesh(group, elements, mesh, id, category, label, metadata = {}) {
   mesh.userData = { id, name: label || id, category, ...metadata };
   group.add(mesh); elements.push(mesh); return mesh;
 }
-function addRod(group, elements, bar, scale, fallbackId, owner, layout, layoutIndex) {
+function addRod(group, elements, bar, scale, fallbackId, owner, layout, layoutIndex, MATERIALS) {
   const a = vec(bar.start, scale), b = vec(bar.end, scale);
   const direction = b.clone().sub(a), length = direction.length();
   const diameter = bar.diameter?.value;
@@ -30,7 +30,7 @@ function addRod(group, elements, bar, scale, fallbackId, owner, layout, layoutIn
   mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction.normalize());
   addMesh(group, elements, mesh, bar.id || fallbackId, "reinforcement", bar.id || fallbackId, { ownerId: owner.id, ownerName: owner.label || owner.id, reinforcementType: layout.arrangement || "longitudinal", diameter: diameter, spacing: layout.spacing?.value ?? null, cover: layout.cover?.value ?? null, quantity: layout.quantity ?? (layout.bars?.length || 1), provenance: bar.provenance || layout.provenance || null, layoutIndex });
 }
-function addCylinderBetween(group, elements, a, b, diameter, id, metadata = {}) {
+function addCylinderBetween(group, elements, a, b, diameter, id, metadata = {}, MATERIALS) {
   const direction = b.clone().sub(a), length = direction.length();
   if (length <= 0) return;
   const mesh = new THREE.Mesh(new THREE.CylinderGeometry(diameter / 2, diameter / 2, length, 8), MATERIALS.rebar);
@@ -38,7 +38,7 @@ function addCylinderBetween(group, elements, a, b, diameter, id, metadata = {}) 
   mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction.normalize());
   addMesh(group, elements, mesh, id, "reinforcement", id, metadata);
 }
-function addDerivedStirrups(group, elements, item, scale, category) {
+function addDerivedStirrups(group, elements, item, scale, category, MATERIALS) {
   const layouts = item.reinforcement || [];
   for (let li = 0; li < layouts.length; li++) {
     const layout = layouts[li];
@@ -81,13 +81,13 @@ function addDerivedStirrups(group, elements, item, scale, category) {
         ownerId: item.id, ownerName: item.label || item.id, reinforcementType: layout.arrangement,
         diameter: layout.barDiameter.value, spacing: layout.spacing.value, cover: layout.cover.value,
         quantity: count, stirrupIndex: n + 1, provenance: layout.provenance || null, layoutIndex: li
-      });
+      }, MATERIALS);
     }
   }
 }
-function addReinforcement(group, elements, item, scale) {
+function addReinforcement(group, elements, item, scale, MATERIALS) {
   (item.reinforcement || []).forEach((layout, i) => (layout.bars || []).forEach((bar, j) =>
-    addRod(group, elements, bar, scale, `${item.id}-rebar-${i}-${j}`, item, layout, i)));
+    addRod(group, elements, bar, scale, `${item.id}-rebar-${i}-${j}`, item, layout, i, MATERIALS)));
 }
 function addSlab(group, elements, slab, scale, levelElevation) {
   const y = (slab.elevation?.value ?? levelElevation) * scale;
@@ -120,7 +120,7 @@ function polygonIntersections(outline, axis, fixed) {
   return values.sort((a, b) => a - b);
 }
 
-function addDerivedSlabReinforcement(group, elements, slab, layout, scale, topElevation, layoutIndex) {
+function addDerivedSlabReinforcement(group, elements, slab, layout, scale, topElevation, layoutIndex, MATERIALS) {
   if (!layout.barDiameter?.value || !layout.spacing?.value || !layout.cover?.value) return;
   const diameter = layout.barDiameter.value * scale;
   const spacing = layout.spacing.value * scale;
@@ -154,7 +154,7 @@ function addDerivedSlabReinforcement(group, elements, slab, layout, scale, topEl
             ownerId: slab.id, ownerName: slab.label || slab.id, reinforcementType: arrangement,
             diameter: layout.barDiameter.value, spacing: layout.spacing.value, cover: layout.cover.value,
             barMark: layout.barMark || null, provenance: layout.provenance || null, layoutIndex, face
-          });
+          }, MATERIALS);
           generated++;
         }
       }
@@ -214,20 +214,20 @@ function createFromSpec(scene, model, MATERIALS) {
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(c.width.value*s, length, c.depth.value*s), MATERIALS.concrete);
     mesh.position.copy(a).add(b).multiplyScalar(.5);
     mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0), d.normalize());
-    addMesh(group,elements,mesh,c.id,"columns",c.label); addReinforcement(group,elements,c,s); addDerivedStirrups(group,elements,c,s,"columns");
+    addMesh(group,elements,mesh,c.id,"columns",c.label); addReinforcement(group,elements,c,s,MATERIALS); addDerivedStirrups(group,elements,c,s,"columns",MATERIALS);
   }
   for (const b of model.structure.beams || []) {
     const a=vec(b.start,s), z=vec(b.end,s), d=z.clone().sub(a), length=d.length(); if(!length) continue;
     const mesh=new THREE.Mesh(new THREE.BoxGeometry(length,b.depth.value*s,b.width.value*s),MATERIALS.beam);
     mesh.position.copy(a).add(z).multiplyScalar(.5);
     mesh.quaternion.setFromUnitVectors(new THREE.Vector3(1,0,0),d.normalize());
-    addMesh(group,elements,mesh,b.id,"beams",b.label); addReinforcement(group,elements,b,s); addDerivedStirrups(group,elements,b,s,"beams");
+    addMesh(group,elements,mesh,b.id,"beams",b.label); addReinforcement(group,elements,b,s,MATERIALS); addDerivedStirrups(group,elements,b,s,"beams",MATERIALS);
   }
   for (const slab of model.structure.slabs || []) {
     const elevation=slab.levelId && levels.has(slab.levelId) ? levels.get(slab.levelId) : (levels.values().next().value ?? 0);
     addSlab(group,elements,slab,s,elevation);
-    addReinforcement(group,elements,slab,s);
-    (slab.reinforcement || []).forEach((layout, index) => addDerivedSlabReinforcement(group, elements, slab, layout, s, slab.elevation?.value ?? elevation, index));
+    addReinforcement(group,elements,slab,s,MATERIALS);
+    (slab.reinforcement || []).forEach((layout, index) => addDerivedSlabReinforcement(group, elements, slab, layout, s, slab.elevation?.value ?? elevation, index, MATERIALS));
   }
   for (const roof of model.structure.roofs || []) addRoof(group, elements, roof, s, MATERIALS);
   for (const stair of model.structure.stairs || []) {
@@ -247,7 +247,7 @@ function createFromSpec(scene, model, MATERIALS) {
       mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), direction);
       addMesh(group, elements, mesh, `${stair.id}-step-${step + 1}`, "stairs", stair.label || stair.id);
     }
-    addReinforcement(group, elements, stair, s);
+    addReinforcement(group, elements, stair, s, MATERIALS);
   }
   for (const w of model.structure.walls || []) {
     const a=vec(w.start,s), b=vec(w.end,s), d=b.clone().sub(a), length=d.length(); if(!length) continue;
@@ -267,12 +267,12 @@ function createFromSpec(scene, model, MATERIALS) {
       if(!opening)addWallPart(`${w.id}-segment-${i}`,from,to,0,h);
       else {addWallPart(`${w.id}-sill-${i}`,from,to,0,opening.bottom);addWallPart(`${w.id}-lintel-${i}`,from,to,opening.top,h);}
     }
-    addReinforcement(group,elements,w,s);
+    addReinforcement(group,elements,w,s,MATERIALS);
   }
   for (const f of model.structure.foundations || []) {
     const mesh=new THREE.Mesh(new THREE.BoxGeometry(f.width.value*s,f.depth.value*s,f.length.value*s),MATERIALS.foundation);
     mesh.position.copy(vec(f.center,s));
-    addMesh(group,elements,mesh,f.id,"foundations",f.label); addReinforcement(group,elements,f,s);
+    addMesh(group,elements,mesh,f.id,"foundations",f.label); addReinforcement(group,elements,f,s,MATERIALS);
   }
   const bounds = new THREE.Box3().setFromObject(group);
   const boundsSize = bounds.isEmpty() ? new THREE.Vector3(10, 5, 10) : bounds.getSize(new THREE.Vector3());
