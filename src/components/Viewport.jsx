@@ -10,11 +10,13 @@ const ACTION_CATEGORY = {
   grids: "grids", all: "all"
 };
 
-export default function Viewport({ view, showGrid = true, modelSpec = null, modelActions = [], compact = false }) {
+export default function Viewport({ view, showGrid = true, modelSpec = null, modelActions = [], findings = [], focusElementId = null, focusRequest = null, compact = false }) {
   const hostRef = useRef(null);
   const sceneState = useRef(null);
   const modelSpecRef = useRef(modelSpec);
   const actionsRef = useRef(modelActions);
+  const findingsRef = useRef(findings);
+  const frameOpacityRef = useRef(1);
   const viewRef = useRef(view);
   const showGridRef = useRef(showGrid);
   const cutawayRef = useRef({ enabled: false, axis: "y", position: 0.5 });
@@ -23,7 +25,8 @@ export default function Viewport({ view, showGrid = true, modelSpec = null, mode
   const measurePointsRef = useRef([]);
   const [measureMode, setMeasureMode] = useState(false);
   const [measurement, setMeasurement] = useState(null);
-  const [toolsOpen, setToolsOpen] = useState(() => typeof window !== "undefined" && window.matchMedia("(min-width: 761px)").matches);
+  const [toolsOpen, setToolsOpen] = useState(() => !compact && typeof window !== "undefined" && window.matchMedia("(min-width: 761px)").matches);
+  const [frameOpacity, setFrameOpacity] = useState(1);
   const [inspectionNotice, setInspectionNotice] = useState("");
   const [cutaway, setCutaway] = useState({ enabled: false, axis: "y", position: 0.5 });
   const [selectedElement, setSelectedElement] = useState(null);
@@ -34,7 +37,12 @@ export default function Viewport({ view, showGrid = true, modelSpec = null, mode
   const inspectionModeRef = useRef("all");
 
   useEffect(() => { modelSpecRef.current = modelSpec; }, [modelSpec]);
-  useEffect(() => { actionsRef.current = modelActions; }, [modelActions]);
+  useEffect(() => { actionsRef.current = modelActions; hostRef.current?.dispatchEvent(new CustomEvent("buildlens-model-change")); }, [modelActions]);
+  useEffect(() => { findingsRef.current = findings; sceneState.current?.rebuild(); }, [findings]);
+  useEffect(() => { frameOpacityRef.current = frameOpacity; hostRef.current?.dispatchEvent(new CustomEvent("buildlens-model-change")); }, [frameOpacity]);
+  useEffect(() => {
+    if (focusElementId) hostRef.current?.dispatchEvent(new CustomEvent("buildlens-focus-element", { detail: focusElementId }));
+  }, [focusElementId, focusRequest]);
   useEffect(() => { viewRef.current = view; }, [view]);
   useEffect(() => { showGridRef.current = showGrid; }, [showGrid]);
   useEffect(() => { cutawayRef.current = cutaway; hostRef.current?.dispatchEvent(new CustomEvent("buildlens-cutaway-change")); }, [cutaway]);
@@ -85,6 +93,7 @@ export default function Viewport({ view, showGrid = true, modelSpec = null, mode
 
     let modelGroup = null;
     let modelElements = [];
+    let findingHighlights = [];
     const measurementGroup = new THREE.Group();
     measurementGroup.name = "BuildLens measurements";
     scene.add(measurementGroup);
@@ -94,11 +103,11 @@ export default function Viewport({ view, showGrid = true, modelSpec = null, mode
     const pointer = new THREE.Vector2();
     const visibility = new Map();
     const applyVisibility = () => {
-      const latest = new Map();
+      const latest = new Map(), opacityActions = new Map();
       for (const action of actionsRef.current || []) {
-        if (action?.type !== "model.visibility") continue;
-        const category = ACTION_CATEGORY[action.category];
-        if (category) latest.set(category, action);
+        const category = ACTION_CATEGORY[action?.category] || action?.category;
+        if (action?.type === "model.visibility" && category) latest.set(category, action);
+        if (action?.type === "model.opacity" && category) opacityActions.set(category, action);
       }
       for (const element of modelElements) {
         const category = element.userData.category;
@@ -111,7 +120,37 @@ export default function Viewport({ view, showGrid = true, modelSpec = null, mode
         }
         if (isolatedOwnerIdRef.current) { const ownerId = isolatedOwnerIdRef.current; const belongs = element.userData.id === ownerId || element.userData.ownerId === ownerId; visible = belongs && (inspectionModeRef.current === "rebar" ? category === "reinforcement" : true); }
         element.visible = visible && !hiddenIdsRef.current.has(element.userData.id);
+        const categoryOpacity = opacityActions.get(category) || opacityActions.get("all");
+        const multiplier = categoryOpacity?.opacity ?? (category === "reinforcement" ? 1 : frameOpacityRef.current);
+        if (element.material && multiplier < 0.999) {
+          if (!element.userData.buildLensOpacityMaterial) {
+            const originals = Array.isArray(element.material) ? element.material : [element.material];
+            const clones = originals.map(material => material.clone());
+            clones.forEach((material, index) => {
+              material.userData.buildLensBaseOpacity = originals[index].opacity;
+              material.userData.buildLensBaseTransparent = originals[index].transparent;
+            });
+            element.material = Array.isArray(element.material) ? clones : clones[0];
+            element.userData.buildLensOpacityMaterial = true;
+          }
+          const materials = Array.isArray(element.material) ? element.material : [element.material];
+          materials.forEach(material => {
+            material.opacity = material.userData.buildLensBaseOpacity * multiplier;
+            material.transparent = material.userData.buildLensBaseTransparent || multiplier < 0.999;
+            material.depthWrite = multiplier >= 0.999 && !material.userData.buildLensBaseTransparent;
+            material.needsUpdate = true;
+          });
+        } else if (element.userData.buildLensOpacityMaterial) {
+          const materials = Array.isArray(element.material) ? element.material : [element.material];
+          materials.forEach(material => {
+            material.opacity = material.userData.buildLensBaseOpacity;
+            material.transparent = material.userData.buildLensBaseTransparent;
+            material.depthWrite = !material.transparent;
+            material.needsUpdate = true;
+          });
+        }
       }
+      findingHighlights.forEach(({ outline, source }) => { outline.visible = source.visible; });
       grid.visible = showGridRef.current && viewRef.current !== "foundation";
     };
 
@@ -213,6 +252,27 @@ export default function Viewport({ view, showGrid = true, modelSpec = null, mode
       }
       host.dispatchEvent(new CustomEvent("buildlens-select-element", { detail: data ? { id: data.id, name: data.name, category: data.category, dimensions, units: modelSpecRef.current?.units || "m", ownerId: data.ownerId || (data.category === "reinforcement" ? null : data.id), reinforcementCount: data.category === "reinforcement" ? null : modelElements.filter(item => item.userData.category === "reinforcement" && item.userData.ownerId === data.id).length, ownerName: data.ownerName || null, reinforcementType: data.reinforcementType || null, diameter: data.diameter ?? null, spacing: data.spacing ?? null, cover: data.cover ?? null, quantity: data.quantity ?? null, stirrupIndex: data.stirrupIndex ?? null, provenance: data.provenance || null } : null }));
     };
+    const onFocusElement = event => {
+      const target = modelElements.find(element => element.userData.id === event.detail);
+      if (!target) { setInspectionNotice("The selected finding does not match an element in the current model."); return; }
+      const data = target.userData;
+      host.dispatchEvent(new CustomEvent("buildlens-select-element", { detail: {
+        id: data.id, name: data.name, category: data.category,
+        ownerId: data.ownerId || (data.category === "reinforcement" ? null : data.id),
+        ownerName: data.ownerName || null, reinforcementType: data.reinforcementType || null,
+        diameter: data.diameter ?? null, spacing: data.spacing ?? null, cover: data.cover ?? null,
+        quantity: data.quantity ?? null, provenance: data.provenance || null,
+        units: modelSpecRef.current?.units || "m"
+      }}));
+      const bounds = new THREE.Box3().setFromObject(target);
+      const center = bounds.getCenter(new THREE.Vector3());
+      const size = bounds.getSize(new THREE.Vector3());
+      const span = Math.max(size.x, size.y, size.z, 1);
+      controls.target.copy(center);
+      camera.position.copy(center).add(new THREE.Vector3(span * 1.3, span * 0.9, span * 1.5));
+      controls.update();
+      setInspectionNotice("Selected finding: " + data.id);
+    };
     const onSelection = event => setSelectedElement(event.detail || null);
     const enterModel = () => {
       if (!modelGroup) return;
@@ -227,6 +287,25 @@ export default function Viewport({ view, showGrid = true, modelSpec = null, mode
       const created = createBuildingModel(scene, modelSpecRef.current);
       modelGroup = created.building;
       modelElements = created.elements;
+      findingHighlights = [];
+      const highlightIds = new Set([
+        ...(created.connectivity?.warnings || []).map(warning => warning.elementId),
+        ...(findingsRef.current || []).map(finding => finding.elementId).filter(Boolean)
+      ]);
+      for (const element of modelElements) {
+        if (!highlightIds.has(element.userData.id) || !element.geometry) continue;
+        const outline = new THREE.LineSegments(
+          new THREE.EdgesGeometry(element.geometry),
+          new THREE.LineBasicMaterial({ color: "#ff514d", depthTest: false, transparent: true, opacity: 0.98 })
+        );
+        outline.position.copy(element.position);
+        outline.quaternion.copy(element.quaternion);
+        outline.scale.copy(element.scale);
+        outline.renderOrder = 900;
+        outline.userData.findingOutlineFor = element.userData.id;
+        modelGroup.add(outline);
+        findingHighlights.push({ outline, source: element });
+      }
       if (connectivityBadge) connectivityBadge.remove();
       connectivityBadge = null;
       if (modelSpecRef.current && created.connectivity) {
@@ -257,6 +336,7 @@ export default function Viewport({ view, showGrid = true, modelSpec = null, mode
     host.addEventListener("buildlens-model-change", onModelChange);
     host.addEventListener("buildlens-cutaway-change", onCutawayChange);
     host.addEventListener("buildlens-select-element", onSelection);
+    host.addEventListener("buildlens-focus-element", onFocusElement);
     renderer.domElement.addEventListener("click", onSelect);
     host.__resetBuildLensCamera = resetCamera;
     host.__enterBuildLensModel = enterModel;
@@ -283,6 +363,7 @@ export default function Viewport({ view, showGrid = true, modelSpec = null, mode
       host.removeEventListener("buildlens-model-change", onModelChange);
       host.removeEventListener("buildlens-cutaway-change", onCutawayChange);
       host.removeEventListener("buildlens-select-element", onSelection);
+      host.removeEventListener("buildlens-focus-element", onFocusElement);
       renderer.domElement.removeEventListener("click", onSelect);
       delete host.__resetBuildLensCamera;
       delete host.__enterBuildLensModel;
@@ -341,6 +422,7 @@ export default function Viewport({ view, showGrid = true, modelSpec = null, mode
       </div>
       <div className="inspection-row measurement-status"><span>{inspectionNotice || (measurement?.waitingForSecondPoint ? "First point selected — choose the second point." : measurement?.label ? "Measured distance: " + measurement.label : measureMode ? "Tap two points on the model to measure." : "Measurements use the model declared units.")}</span></div>
       <div className="inspection-row inspection-slider-row"><span>Section position</span><input aria-label="Cutaway section position" type="range" min="0" max="100" value={Math.round(cutaway.position * 100)} onChange={event => setCutaway(current => ({ ...current, position: Number(event.target.value) / 100 }))} disabled={!cutaway.enabled}/></div>
+      <div className="inspection-row inspection-slider-row"><span>Frame opacity</span><input aria-label="Frame opacity" type="range" min="20" max="100" value={Math.round(frameOpacity * 100)} onChange={event => setFrameOpacity(Number(event.target.value) / 100)}/></div>
       <div className="inspection-row selection-row"><span>{selectedElement ? (selectedElement.category === "reinforcement" ? "Rebar: " + (selectedElement.ownerName || selectedElement.ownerId || "unassigned") + " · " + (selectedElement.reinforcementType || "bar") + (selectedElement.diameter ? " · Ø" + (selectedElement.diameter * ({ m: 1000, mm: 1, cm: 10, ft: 304.8 }[selectedElement.units] || 1000)).toFixed(0) + " mm" : "") + (selectedElement.spacing ? " · @" + (selectedElement.spacing * ({ m: 1000, mm: 1, cm: 10, ft: 304.8 }[selectedElement.units] || 1000)).toFixed(0) + " mm" : "") + (selectedElement.cover ? " · cover " + (selectedElement.cover * ({ m: 1000, mm: 1, cm: 10, ft: 304.8 }[selectedElement.units] || 1000)).toFixed(0) + " mm" : "") + (selectedElement.quantity ? " · count " + selectedElement.quantity : "") + (selectedElement.stirrupIndex ? " · link " + selectedElement.stirrupIndex : "") + (selectedElement.provenance?.status ? " · " + selectedElement.provenance.status : "") : "Selected: " + selectedElement.name + " · " + selectedElement.category + (selectedElement.dimensions ? " · " + selectedElement.dimensions.join(" × ") + " " + selectedElement.units + " local extents" : "")) : "Tap a structural element to inspect it"}</span><button type="button" className="inspection-button" disabled={!selectedElement} onClick={hideSelected}>Hide selected</button><button type="button" className="inspection-button" disabled={!hiddenIds.length} onClick={() => setHiddenIds([])}>Show hidden ({hiddenIds.length})</button></div>
       </div>
     </div>
