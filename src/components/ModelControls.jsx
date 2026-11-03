@@ -4,6 +4,7 @@ import { Box, Building2, Layers3, RotateCcw, SlidersHorizontal } from "lucide-re
 const views = [
   { id: "building", label: "Building", icon: Building2 },
   { id: "structure", label: "Structure", icon: Layers3 },
+  { id: "stairs", label: "Stairs", icon: Building2 },
   { id: "foundation", label: "Foundation", icon: Box },
   { id: "rebar", label: "Reinforcement", icon: SlidersHorizontal }
 ];

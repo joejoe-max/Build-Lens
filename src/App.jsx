@@ -8,6 +8,7 @@ import ModelControls, { ModelViewTabs } from "./components/ModelControls.jsx";
 import EngineeringPanel from "./components/EngineeringPanel.jsx";
 import AssumptionPanel from "./components/AssumptionPanel.jsx";
 import { askBuildLens } from "./services/ai.js";
+import { validateBuildingModel } from "./domain/buildingModel.js";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
@@ -131,10 +132,25 @@ export default function App() {
       const saved = localStorage.getItem("buildlens-workspace-v2");
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed.messages) && parsed.messages.length) { messagesRef.current = parsed.messages; setMessages(parsed.messages); }
+        if (Array.isArray(parsed.messages) && parsed.messages.length) {
+          const safeMessages = parsed.messages.map(item => {
+            if (!item || typeof item !== "object") return item;
+            if (item.modelSpec && !validateBuildingModel(item.modelSpec).valid) {
+              const { modelSpec: ignoredModel, ...safeItem } = item;
+              return safeItem;
+            }
+            return item;
+          });
+          messagesRef.current = safeMessages;
+          setMessages(safeMessages);
+        }
         if (Array.isArray(parsed.files)) setFiles(parsed.files);
         if (typeof parsed.projectName === "string") setProjectName(parsed.projectName);
-        if (parsed.modelSpec && typeof parsed.modelSpec === "object") setModelSpec(parsed.modelSpec);
+        if (parsed.modelSpec && typeof parsed.modelSpec === "object") {
+          const validation = validateBuildingModel(parsed.modelSpec);
+          if (validation.valid) setModelSpec(parsed.modelSpec);
+          else setNotice("A saved model was invalid and has been skipped. Your chat and uploaded files were preserved.");
+        }
         if (Array.isArray(parsed.modelActions)) setModelActions(parsed.modelActions);
         if (Array.isArray(parsed.drawingFindings)) setDrawingFindings(parsed.drawingFindings);
       }
@@ -236,19 +252,22 @@ export default function App() {
         currentModel: modelSpec,
         onStatus: status => setBusyLabel(status),
         onActions: result => {
-          if (result.model) {
-            setModelSpec(result.model);
-            // Keep an immutable model snapshot on the assistant message that
-            // produced it, so each chat response can display its own 3D scene.
+          if (result.model) setModelSpec(result.model);
+          // Keep visibility commands scoped to the assistant response that
+          // produced them; chat previews must not mutate the main workspace.
+          if (result.model || result.actions?.length) {
             const next = [...messagesRef.current];
             const last = next.length - 1;
             if (last >= 0 && next[last].role === "assistant") {
-              next[last] = { ...next[last], modelSpec: result.model, modelActions: result.actions || [] };
+              next[last] = {
+                ...next[last],
+                ...(result.model ? { modelSpec: result.model } : {}),
+                ...(result.actions?.length ? { modelActions: result.actions } : {})
+              };
               messagesRef.current = next;
               setMessages(next);
             }
           }
-          if (result.actions?.length) setModelActions(current => [...current, ...result.actions].slice(-100));
           if (result.findings?.length) setDrawingFindings(current => [...current, ...result.findings].slice(-500));
         },
         onDelta: streamed => {
@@ -310,7 +329,7 @@ export default function App() {
           <ModelControls showGrid={showGrid} onToggleGrid={() => setShowGrid(value => !value)} onReset={() => document.querySelector(".viewport-canvas")?.dispatchEvent(new CustomEvent("buildlens-reset"))} />
         </div>
         <div className="viewport-wrap">
-          <Viewport view={view} showGrid={showGrid} modelSpec={modelSpec} modelActions={modelActions} />
+          <Viewport view={view} showGrid={showGrid} modelSpec={modelSpec} modelActions={[]} />
           <div className="viewport-badge"><span className="live-dot" /> {modelSpec ? "PROJECT MODEL DATA RECEIVED" : "CONCEPT MODEL"} <span className="badge-divider">/</span> {modelSpec ? "VALIDATED" : "DEMO DATA"}</div>
           <div className="viewport-instructions"><span>DRAG TO ORBIT</span><i /><span>RIGHT-DRAG / TWO-FINGER DRAG TO PAN</span><i /><span>SCROLL / PINCH TO ZOOM</span></div>
           <div className="orientation-cube" aria-label="View orientation"><span className="cube-top">Y</span><span className="cube-front">Z</span><span className="cube-side">X</span></div>

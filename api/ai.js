@@ -333,7 +333,7 @@ function executeTool(name, args, state) {
   }
 
   if (name === "set_model_visibility") {
-    const allowed = ["foundations", "columns", "beams", "slabs", "walls", "reinforcement", "grids", "all"];
+    const allowed = ["foundations", "columns", "beams", "slabs", "walls", "stairs", "reinforcement", "grids", "all"];
     if (!allowed.includes(args.category) || typeof args.visible !== "boolean") return { ok: false, error: "Invalid visibility arguments." };
     const action = { type: "model.visibility", category: args.category, visible: args.visible };
     if (args.elementIds !== undefined) {

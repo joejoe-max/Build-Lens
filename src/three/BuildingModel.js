@@ -1,14 +1,16 @@
 import * as THREE from "three";
 import { analyzeStructuralConnectivity } from "../domain/buildingModel.js";
 
-const MATERIALS = {
-  concrete: new THREE.MeshStandardMaterial({ color: "#a9b0b5", roughness: 0.82 }),
-  slab: new THREE.MeshStandardMaterial({ color: "#737d85", roughness: 0.9, side: THREE.DoubleSide }),
-  beam: new THREE.MeshStandardMaterial({ color: "#c5cbd0", roughness: 0.76 }),
-  wall: new THREE.MeshStandardMaterial({ color: "#89939a", roughness: 0.88, transparent: true, opacity: 0.82 }),
-  foundation: new THREE.MeshStandardMaterial({ color: "#69747c", roughness: 0.92 }),
-  rebar: new THREE.MeshStandardMaterial({ color: "#c18b58", metalness: 0.62, roughness: 0.38 })
-};
+function createMaterials() {
+  return {
+    concrete: new THREE.MeshStandardMaterial({ color: "#a9b0b5", roughness: 0.82 }),
+    slab: new THREE.MeshStandardMaterial({ color: "#737d85", roughness: 0.9, side: THREE.DoubleSide }),
+    beam: new THREE.MeshStandardMaterial({ color: "#c5cbd0", roughness: 0.76 }),
+    wall: new THREE.MeshStandardMaterial({ color: "#89939a", roughness: 0.88, transparent: true, opacity: 0.82 }),
+    foundation: new THREE.MeshStandardMaterial({ color: "#69747c", roughness: 0.92 }),
+    rebar: new THREE.MeshStandardMaterial({ color: "#c18b58", metalness: 0.62, roughness: 0.38 })
+  };
+}
 const UNIT_SCALE = { m: 1, mm: 0.001, cm: 0.01, ft: 0.3048 };
 const vec = (p, s) => new THREE.Vector3(p.x * s, p.y * s, p.z * s);
 
@@ -103,7 +105,7 @@ function addSlab(group, elements, slab, scale, levelElevation) {
   mesh.position.y = y;
   addMesh(group, elements, mesh, slab.id, "slabs", slab.label);
 }
-function createFromSpec(scene, model) {
+function createFromSpec(scene, model, MATERIALS) {
   const group = new THREE.Group(); group.name = `BuildLens: ${model.name}`; scene.add(group);
   const elements = [], s = UNIT_SCALE[model.units] || 1;
   const levels = new Map((model.levels || []).map(level => [level.id, level.elevation.value]));
@@ -193,7 +195,7 @@ function createFromSpec(scene, model) {
 
 // Landing-page demonstration geometry. Reinforcement is illustrative only,
 // not a design or a substitute for project-specific bar schedules.
-function createSample(scene) {
+function createSample(scene, MATERIALS) {
   const group = new THREE.Group();
   group.name = "BuildLens illustrative sample";
   scene.add(group);
@@ -284,5 +286,8 @@ function createSample(scene) {
   return { building: group, elements };
 }
 export function createBuildingModel(scene, modelSpec = null) {
-  return modelSpec ? createFromSpec(scene, modelSpec) : createSample(scene);
+  // Materials belong to this viewport instance. A chat preview can now be
+  // unmounted without disposing materials used by the primary canvas.
+  const materials = createMaterials();
+  return modelSpec ? createFromSpec(scene, modelSpec, materials) : createSample(scene, materials);
 }
