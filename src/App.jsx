@@ -533,14 +533,14 @@ export default function App() {
   };
 
   const exportWorkspace = () => {
-    const blob = new Blob([JSON.stringify({ app: "BuildLens", exportedAt: new Date().toISOString(), projectName, files, messages, modelSpec, modelActions, drawingFindings }, null, 2)], { type: "application/json" });
+    const blob = new Blob([JSON.stringify({ app: "BuildLens", exportedAt: new Date().toISOString(), projectName, files, messages, modelSpec, drawingFindings }, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a"); a.href = url; a.download = "buildlens-workspace.json"; a.click(); URL.revokeObjectURL(url);
   };
 
   const clearWorkspace = () => {
     if (!window.confirm("Clear this workspace's chat and uploaded-file list? This cannot be undone.")) return;
-    messagesRef.current = []; setMessages([]); setFiles([]); setPendingAttachments([]); setProjectAttachments([]); clearSavedAttachments(); setModelSpec(null); setModelActions([]); setDrawingFindings([]); setNotice("Workspace cleared.");
+    messagesRef.current = []; setMessages([]); setFiles([]); setPendingAttachments([]); setProjectAttachments([]); clearSavedAttachments(); setModelSpec(null); setDrawingFindings([]); setNotice("Workspace cleared.");
   };
 
   return <main className="app-shell">
