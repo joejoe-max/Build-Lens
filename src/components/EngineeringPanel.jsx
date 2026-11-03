@@ -1,7 +1,8 @@
 import React from "react";
 import { Check, Plus, Send, ShieldAlert, Sparkles, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";\nimport Viewport from "./Viewport.jsx";
+import remarkGfm from "remark-gfm";
+import Viewport from "./Viewport.jsx";
 
 export default function EngineeringPanel({open,onClose,files,onRemoveFile,messages,busy,input,onInputChange,onSend,onClear,onNewChat,fileInputRef,pendingAttachments=[]}) {
  return <aside className={open ? "right-panel mobile-open" : "right-panel"}>
