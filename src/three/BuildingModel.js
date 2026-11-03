@@ -85,6 +85,55 @@ function addDerivedStirrups(group, elements, item, scale, category, MATERIALS) {
     }
   }
 }
+function addDerivedLongitudinalBars(group, elements, item, layout, scale, category, layoutIndex, MATERIALS) {
+  if (layout.arrangement !== "longitudinal" || layout.bars?.length ||
+      !layout.barDiameter?.value || !layout.spacing?.value || !layout.cover?.value ||
+      !item.width?.value || !item.depth?.value) return;
+  const start = category === "columns" ? vec(item.base, scale) : vec(item.start, scale);
+  const end = category === "columns" ? vec(item.top, scale) : vec(item.end, scale);
+  const axis = end.clone().sub(start);
+  const memberLength = axis.length();
+  if (!(memberLength > 0)) return;
+  axis.normalize();
+  let u;
+  if (category === "columns") {
+    u = new THREE.Vector3(1, 0, 0);
+    u.addScaledVector(axis, -u.dot(axis)).normalize();
+    if (u.lengthSq() < 0.5) u.set(0, 0, 1);
+  } else {
+    u = new THREE.Vector3(-axis.z, 0, axis.x).normalize();
+    if (u.lengthSq() < 0.5) u.set(1, 0, 0);
+  }
+  const v = new THREE.Vector3().crossVectors(axis, u).normalize();
+  const diameter = layout.barDiameter.value * scale;
+  const spacing = layout.spacing.value * scale;
+  const cover = layout.cover.value * scale + diameter / 2;
+  const halfW = item.width.value * scale / 2 - cover;
+  const halfD = item.depth.value * scale / 2 - cover;
+  if (halfW <= 0 || halfD <= 0 || memberLength <= cover * 2 || spacing <= 0) return;
+  const corners = [[-halfW,-halfD],[halfW,-halfD],[halfW,halfD],[-halfW,halfD]];
+  const positions = [];
+  for (let side = 0; side < 4 && positions.length < 240; side++) {
+    const a = corners[side], b = corners[(side + 1) % 4];
+    const sideLength = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    const segments = Math.max(1, Math.ceil(sideLength / spacing));
+    for (let n = 0; n < segments && positions.length < 240; n++) {
+      const t = n / segments;
+      positions.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]);
+    }
+  }
+  positions.forEach(([offsetU, offsetV], index) => {
+    const offset = u.clone().multiplyScalar(offsetU).addScaledVector(v, offsetV);
+    const a = start.clone().addScaledVector(axis, cover).add(offset);
+    const b = end.clone().addScaledVector(axis, -cover).add(offset);
+    addCylinderBetween(group, elements, a, b, diameter, item.id + "-longitudinal-" + layoutIndex + "-" + index, {
+      ownerId: item.id, ownerName: item.label || item.id, reinforcementType: "longitudinal",
+      diameter: layout.barDiameter.value, spacing: layout.spacing.value, cover: layout.cover.value,
+      barMark: layout.barMark || null, provenance: layout.provenance || null, layoutIndex
+    }, MATERIALS);
+  });
+}
+
 function addReinforcement(group, elements, item, scale, MATERIALS) {
   (item.reinforcement || []).forEach((layout, i) => (layout.bars || []).forEach((bar, j) =>
     addRod(group, elements, bar, scale, `${item.id}-rebar-${i}-${j}`, item, layout, i, MATERIALS)));
@@ -214,14 +263,14 @@ function createFromSpec(scene, model, MATERIALS) {
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(c.width.value*s, length, c.depth.value*s), MATERIALS.concrete);
     mesh.position.copy(a).add(b).multiplyScalar(.5);
     mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0), d.normalize());
-    addMesh(group,elements,mesh,c.id,"columns",c.label); addReinforcement(group,elements,c,s,MATERIALS); addDerivedStirrups(group,elements,c,s,"columns",MATERIALS);
+    addMesh(group,elements,mesh,c.id,"columns",c.label); addReinforcement(group,elements,c,s,MATERIALS); (c.reinforcement || []).forEach((layout,index) => addDerivedLongitudinalBars(group,elements,c,layout,s,"columns",index,MATERIALS)); addDerivedStirrups(group,elements,c,s,"columns",MATERIALS);
   }
   for (const b of model.structure.beams || []) {
     const a=vec(b.start,s), z=vec(b.end,s), d=z.clone().sub(a), length=d.length(); if(!length) continue;
     const mesh=new THREE.Mesh(new THREE.BoxGeometry(length,b.depth.value*s,b.width.value*s),MATERIALS.beam);
     mesh.position.copy(a).add(z).multiplyScalar(.5);
     mesh.quaternion.setFromUnitVectors(new THREE.Vector3(1,0,0),d.normalize());
-    addMesh(group,elements,mesh,b.id,"beams",b.label); addReinforcement(group,elements,b,s,MATERIALS); addDerivedStirrups(group,elements,b,s,"beams",MATERIALS);
+    addMesh(group,elements,mesh,b.id,"beams",b.label); addReinforcement(group,elements,b,s,MATERIALS); (b.reinforcement || []).forEach((layout,index) => addDerivedLongitudinalBars(group,elements,b,layout,s,"beams",index,MATERIALS)); addDerivedStirrups(group,elements,b,s,"beams",MATERIALS);
   }
   for (const slab of model.structure.slabs || []) {
     const elevation=slab.levelId && levels.has(slab.levelId) ? levels.get(slab.levelId) : (levels.values().next().value ?? 0);
