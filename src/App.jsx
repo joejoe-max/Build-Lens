@@ -234,7 +234,8 @@ export default function App() {
         history,
         attachments: requestAttachments,
         currentModel: modelSpec,
-        onStatus: status => setBusyLabel(status),\n        onActions: result => {
+        onStatus: status => setBusyLabel(status),
+        onActions: result => {
           if (result.model) {
             setModelSpec(result.model);
             // Keep an immutable model snapshot on the assistant message that
