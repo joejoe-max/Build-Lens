@@ -530,7 +530,23 @@ export function analyzeStructuralConnectivity(model) {
        Math.abs((item.center.y + item.depth.value / 2) - column.base.y) <= tolerance * 2)
     );
     if (foundation) connections.push({ columnId: column.id, foundationId: foundation.id, status: "foundation_support" });
-    else warnings.push({ code: "column_without_foundation", elementId: column.id, message: `No matching foundation is modeled beneath column ${column.id}.` });
+    else warnings.push({ code: "column_without_foundation", elementId: column.id, message: "No matching foundation is modeled beneath column " + column.id + "." });
+    const xGrids = (model.grids || []).filter(grid => grid.axis === "x");
+    const zGrids = (model.grids || []).filter(grid => grid.axis === "z");
+    const xOffset = xGrids.length ? Math.min(...xGrids.map(grid => Math.abs(grid.position - column.base.x))) : 0;
+    const zOffset = zGrids.length ? Math.min(...zGrids.map(grid => Math.abs(grid.position - column.base.z))) : 0;
+    if ((xGrids.length && xOffset > tolerance) || (zGrids.length && zOffset > tolerance)) {
+      warnings.push({ code: "off_grid_column", elementId: column.id, message: "Column " + column.id + " is offset from the nearest supplied grid line (X offset " + xOffset.toFixed(3) + ", Z offset " + zOffset.toFixed(3) + " " + model.units + "). Confirm whether this is intentional." });
+    }
+  }
+  for (const category of ["columns", "beams", "slabs", "walls", "stairs", "foundations"]) {
+    for (const element of model.structure[category] || []) {
+      for (const layout of element.reinforcement || []) {
+        if (!layout.barMark && (layout.arrangement || layout.bars?.length || layout.barDiameter?.value)) {
+          warnings.push({ code: "missing_bar_mark", elementId: element.id, message: "Reinforcement on " + element.id + " has no bar mark identifier in the supplied model data." });
+        }
+      }
+    }
   }
   return { connections, warnings };
 }
