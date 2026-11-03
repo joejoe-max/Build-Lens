@@ -136,7 +136,7 @@ async function readCadAttachment(file, extension) {
   if (extension === "dwg") {
     const dwg = await file.arrayBuffer();
     const converter = await import("dwgdxf");
-    if (!dwgConverterPromise) dwgConverterPromise = converter.init();
+    if (!dwgConverterPromise) dwgConverterPromise = converter.init({ wasmBase: converter.CDN_WASM_BASE });
     await dwgConverterPromise;
     const converted = await converter.convertDwgToDxf(new Uint8Array(dwg));
     dxfText = new TextDecoder().decode(converted);
@@ -372,7 +372,17 @@ export default function App() {
           if (validation.valid) setModelSpec(parsed.modelSpec);
           else setNotice("A saved model was invalid and has been skipped. Your chat and uploaded files were preserved.");
         }
-        if (Array.isArray(parsed.modelActions)) setModelActions(parsed.modelActions);
+        if (Array.isArray(parsed.modelActions)) {
+            const unique = new Map();
+            for (const action of parsed.modelActions) {
+              if (!action || !["model.visibility", "model.opacity"].includes(action.type)) continue;
+              const scope = (action.elementIds || []).slice().sort().join(",");
+              if (action.category === "all") unique.clear();
+              else unique.delete(action.type + "|" + action.category + "|" + scope);
+              unique.set(action.type + "|" + action.category + "|" + scope, action);
+            }
+            setModelActions([...unique.values()].slice(-40));
+          }
         if (Array.isArray(parsed.drawingFindings)) setDrawingFindings(parsed.drawingFindings);
       }
     } catch { /* Ignore invalid local workspace data. */ }
@@ -498,7 +508,8 @@ export default function App() {
               let next = [...current];
               for (const action of workspaceActions) {
                 const scope = (action.elementIds || []).slice().sort().join(",");
-                next = next.filter(existing => !(existing.type === action.type &&
+                if (action.category === "all") next = next.filter(existing => existing.type !== action.type);
+                else next = next.filter(existing => !(existing.type === action.type &&
                   existing.category === action.category &&
                   (existing.elementIds || []).slice().sort().join(",") === scope));
                 next.push(action);
