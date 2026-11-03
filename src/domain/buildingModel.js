@@ -522,6 +522,19 @@ export function analyzeStructuralConnectivity(model) {
       else warnings.push({ code: "unconnected_beam_end", elementId: beam.id, endpoint: end, message: `Beam ${beam.id} ${end} does not meet a modeled column or beam endpoint within ${tolerance} ${model.units}.` });
     }
   }
+  for (let i = 0; i < columns.length; i++) {
+    for (let j = i + 1; j < columns.length; j++) {
+      const a = columns[i], b = columns[j];
+      const dx = Math.abs(a.base.x - b.base.x), dz = Math.abs(a.base.z - b.base.z);
+      if (dx < (a.width.value + b.width.value) / 2 - tolerance &&
+          dz < (a.depth.value + b.depth.value) / 2 - tolerance) {
+        warnings.push({ code: "overlapping_columns", elementId: a.id, relatedElementId: b.id,
+          message: "Columns " + a.id + " and " + b.id + " overlap in plan. Confirm the member layout and IDs." });
+        warnings.push({ code: "overlapping_columns", elementId: b.id, relatedElementId: a.id,
+          message: "Columns " + b.id + " and " + a.id + " overlap in plan. Confirm the member layout and IDs." });
+      }
+    }
+  }
   for (const column of columns) {
     const foundation = foundations.find(item =>
       (item.supportedElementIds || []).includes(column.id) ||
