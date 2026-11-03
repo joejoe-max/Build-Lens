@@ -8,6 +8,7 @@ function createMaterials() {
     beam: new THREE.MeshStandardMaterial({ color: "#c5cbd0", roughness: 0.76 }),
     wall: new THREE.MeshStandardMaterial({ color: "#89939a", roughness: 0.88, transparent: true, opacity: 0.82 }),
     foundation: new THREE.MeshStandardMaterial({ color: "#69747c", roughness: 0.92 }),
+    roof: new THREE.MeshStandardMaterial({ color: "#8d969c", roughness: 0.82, side: THREE.DoubleSide }),
     rebar: new THREE.MeshStandardMaterial({ color: "#c18b58", metalness: 0.62, roughness: 0.38 })
   };
 }
@@ -105,6 +106,104 @@ function addSlab(group, elements, slab, scale, levelElevation) {
   mesh.position.y = y;
   addMesh(group, elements, mesh, slab.id, "slabs", slab.label);
 }
+function polygonIntersections(outline, axis, fixed) {
+  const values = [];
+  for (let i = 0; i < outline.length; i++) {
+    const a = outline[i], b = outline[(i + 1) % outline.length];
+    const aFixed = axis === "x" ? a.z : a.x;
+    const bFixed = axis === "x" ? b.z : b.x;
+    if ((aFixed <= fixed && bFixed > fixed) || (bFixed <= fixed && aFixed > fixed)) {
+      const t = (fixed - aFixed) / (bFixed - aFixed);
+      values.push(axis === "x" ? a.x + (b.x - a.x) * t : a.z + (b.z - a.z) * t);
+    }
+  }
+  return values.sort((a, b) => a - b);
+}
+
+function addDerivedSlabReinforcement(group, elements, slab, layout, scale, topElevation, layoutIndex) {
+  if (!layout.barDiameter?.value || !layout.spacing?.value || !layout.cover?.value) return;
+  const diameter = layout.barDiameter.value * scale;
+  const spacing = layout.spacing.value * scale;
+  const cover = layout.cover.value * scale + diameter / 2;
+  if (!(diameter > 0 && spacing > 0) || slab.outline?.length < 3) return;
+  const outline = slab.outline;
+  const minX = Math.min(...outline.map(point => point.x)) * scale;
+  const maxX = Math.max(...outline.map(point => point.x)) * scale;
+  const minZ = Math.min(...outline.map(point => point.z)) * scale;
+  const maxZ = Math.max(...outline.map(point => point.z)) * scale;
+  const arrangement = layout.arrangement || "mesh";
+  const faces = arrangement === "top" ? ["top"] : arrangement === "bottom" ? ["bottom"] : ["top", "bottom"];
+  const directions = arrangement === "longitudinal" ? ["x"] : arrangement === "transverse" ? ["z"] : ["x", "z"];
+  const slabTop = topElevation * scale;
+  const slabThickness = slab.thickness.value * scale;
+  let generated = 0;
+  for (const face of faces) {
+    const y = face === "top" ? slabTop - cover : slabTop - slabThickness + cover;
+    for (const axis of directions) {
+      const fixedMin = axis === "x" ? minZ + cover : minX + cover;
+      const fixedMax = axis === "x" ? maxZ - cover : maxX - cover;
+      for (let fixed = fixedMin; fixed <= fixedMax + 1e-6 && generated < 1200; fixed += spacing) {
+        const intersections = polygonIntersections(outline, axis, fixed / scale);
+        for (let i = 0; i + 1 < intersections.length && generated < 1200; i += 2) {
+          const startValue = intersections[i] * scale + cover;
+          const endValue = intersections[i + 1] * scale - cover;
+          if (endValue - startValue <= diameter * 2) continue;
+          const a = axis === "x" ? new THREE.Vector3(startValue, y, fixed) : new THREE.Vector3(fixed, y, startValue);
+          const b = axis === "x" ? new THREE.Vector3(endValue, y, fixed) : new THREE.Vector3(fixed, y, endValue);
+          addCylinderBetween(group, elements, a, b, diameter, slab.id + "-derived-" + layoutIndex + "-" + face + "-" + axis + "-" + generated, {
+            ownerId: slab.id, ownerName: slab.label || slab.id, reinforcementType: arrangement,
+            diameter: layout.barDiameter.value, spacing: layout.spacing.value, cover: layout.cover.value,
+            barMark: layout.barMark || null, provenance: layout.provenance || null, layoutIndex, face
+          });
+          generated++;
+        }
+      }
+    }
+  }
+}
+
+function addRoof(group, elements, roof, scale, MATERIALS) {
+  const shape = new THREE.Shape();
+  roof.outline.forEach((point, index) => index
+    ? shape.lineTo(point.x * scale, point.z * scale)
+    : shape.moveTo(point.x * scale, point.z * scale));
+  shape.closePath();
+  const geometry = new THREE.ShapeGeometry(shape, 24);
+  const positions = geometry.attributes.position;
+  const xs = roof.outline.map(point => point.x * scale);
+  const zs = roof.outline.map(point => point.z * scale);
+  const minX = Math.min(...xs), maxX = Math.max(...xs);
+  const minZ = Math.min(...zs), maxZ = Math.max(...zs);
+  const centerX = (minX + maxX) / 2, centerZ = (minZ + maxZ) / 2;
+  const rise = roof.type === "flat" ? 0 : (roof.rise?.value || 0) * scale;
+  const base = roof.eavesElevation.value * scale;
+  for (let i = 0; i < positions.count; i++) {
+    const x = positions.getX(i), z = positions.getY(i);
+    let factor = 0;
+    if (roof.type === "gable") {
+      const span = roof.ridgeAxis === "x" ? maxZ - minZ : maxX - minX;
+      const offset = roof.ridgeAxis === "x" ? Math.abs(z - centerZ) : Math.abs(x - centerX);
+      factor = span > 0 ? Math.max(0, 1 - offset / (span / 2)) : 0;
+    } else if (roof.type === "hip") {
+      const nx = maxX > minX ? Math.abs((x - centerX) / ((maxX - minX) / 2)) : 0;
+      const nz = maxZ > minZ ? Math.abs((z - centerZ) / ((maxZ - minZ) / 2)) : 0;
+      factor = Math.max(0, 1 - Math.max(nx, nz));
+    } else if (roof.type === "shed") {
+      const t = roof.ridgeAxis === "x"
+        ? (maxZ > minZ ? (z - minZ) / (maxZ - minZ) : 0)
+        : (maxX > minX ? (x - minX) / (maxX - minX) : 0);
+      factor = Math.max(0, Math.min(1, t));
+    }
+    positions.setXYZ(i, x, base + rise * factor, z);
+  }
+  geometry.computeVertexNormals();
+  const mesh = new THREE.Mesh(geometry, MATERIALS.roof);
+  addMesh(group, elements, mesh, roof.id, "roofs", roof.label || roof.type + " roof", {
+    roofType: roof.type, ridgeAxis: roof.ridgeAxis || null, rise: roof.rise?.value ?? 0,
+    thickness: roof.thickness?.value ?? null, provenance: roof.provenance
+  });
+}
+
 function createFromSpec(scene, model, MATERIALS) {
   const group = new THREE.Group(); group.name = `BuildLens: ${model.name}`; scene.add(group);
   const elements = [], s = UNIT_SCALE[model.units] || 1;
@@ -126,8 +225,11 @@ function createFromSpec(scene, model, MATERIALS) {
   }
   for (const slab of model.structure.slabs || []) {
     const elevation=slab.levelId && levels.has(slab.levelId) ? levels.get(slab.levelId) : (levels.values().next().value ?? 0);
-    addSlab(group,elements,slab,s,elevation); addReinforcement(group,elements,slab,s);
+    addSlab(group,elements,slab,s,elevation);
+    addReinforcement(group,elements,slab,s);
+    (slab.reinforcement || []).forEach((layout, index) => addDerivedSlabReinforcement(group, elements, slab, layout, s, slab.elevation?.value ?? elevation, index));
   }
+  for (const roof of model.structure.roofs || []) addRoof(group, elements, roof, s, MATERIALS);
   for (const stair of model.structure.stairs || []) {
     const start = vec(stair.start, s), end = vec(stair.end, s);
     const run = new THREE.Vector3(end.x - start.x, 0, end.z - start.z);
