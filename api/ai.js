@@ -393,44 +393,10 @@ function executeTool(name, args, state) {
         description: item.description.slice(0, 600), ...(item.sourceExcerpt ? { sourceExcerpt: String(item.sourceExcerpt).slice(0, 500) } : {})
       });
     }
-    const disciplineOf = item => {
-      if (item.discipline && item.discipline !== "general") return item.discipline;
-      if (/architect|architectural|\barch\b|\bA[-_ ]?\\d{2,}/i.test(item.sourceFile)) return "architectural";
-      if (/structural|structure|\bSTR\b|\bS[-_ ]?\\d{2,}/i.test(item.sourceFile)) return "structural";
-      return "general";
-    };
-    const lengthScale = { mm: 0.001, cm: 0.01, m: 1, ft: 0.3048 };
-    const conflicts = [];
-    const candidates = [...state.findings, ...clean].filter(item => item.elementId && item.category !== "conflict");
-    for (let i = 0; i < candidates.length; i++) {
-      for (let j = i + 1; j < candidates.length; j++) {
-        const a = candidates[i], b = candidates[j];
-        if (a.elementId !== b.elementId || a.property.toLowerCase() !== b.property.toLowerCase()) continue;
-        const da = disciplineOf(a), db = disciplineOf(b);
-        if (!((da === "architectural" && db === "structural") || (da === "structural" && db === "architectural"))) continue;
-        let differs = false;
-        if (typeof a.value === "number" && typeof b.value === "number") {
-          if (lengthScale[a.unit] && lengthScale[b.unit]) differs = Math.abs(a.value * lengthScale[a.unit] - b.value * lengthScale[b.unit]) > 0.001;
-          else if (a.unit === b.unit) differs = Math.abs(a.value - b.value) > 0.0001;
-        } else differs = String(a.value).trim().toLowerCase() !== String(b.value).trim().toLowerCase();
-        if (!differs) continue;
-        const architectural = da === "architectural" ? a : b;
-        const structural = da === "structural" ? a : b;
-        const key = architectural.elementId + "|" + architectural.property.toLowerCase() + "|" + structural.sourceFile + "|" + structural.sourcePage;
-        if (conflicts.some(item => item._key === key) || state.findings.some(item => item.category === "conflict" && item.elementId === architectural.elementId && item.property.toLowerCase().includes(architectural.property.toLowerCase()))) continue;
-        conflicts.push({
-          _key: key, sourceFile: architectural.sourceFile, sourcePage: architectural.sourcePage,
-          category: "conflict", elementId: architectural.elementId,
-          property: "Architectural/structural conflict: " + architectural.property,
-          value: String(architectural.value) + " " + architectural.unit + " vs " + String(structural.value) + " " + structural.unit,
-          unit: architectural.unit, provenance: "missing", confidence: Math.min(a.confidence ?? 0.8, b.confidence ?? 0.8),
-          description: "Architectural sheet " + architectural.sourceFile + " p." + architectural.sourcePage +
-            " differs from structural sheet " + structural.sourceFile + " p." + structural.sourcePage +
-            " for " + architectural.elementId + ". Confirm the governing design information before construction."
-        });
-      }
-    }
-    const conflictFindings = conflicts.map(({ _key, ...item }) => item);
+    const conflictFindings = detectDrawingConflicts([...state.findings, ...clean]).filter(conflict =>
+      !state.findings.some(item => item.category === "conflict" && item.elementId === conflict.elementId &&
+        item.property.toLowerCase() === conflict.property.toLowerCase() &&
+        item.description.includes(conflict.sourceFile)));
     state.findings.push(...clean, ...conflictFindings);
     state.findings = state.findings.slice(-500);
     state.actions.push({ type: "document.observations.add", observations: [...clean, ...conflictFindings] });
