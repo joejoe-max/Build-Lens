@@ -699,6 +699,7 @@ export default async function handler(req, res) {
   try {
     let payload = null;
     let finalAnswer = "";
+    let modelResponseText = "";
     let completed = false;
     const startedAt = Date.now();
     const deadline = startedAt + 285000;
@@ -734,8 +735,9 @@ export default async function handler(req, res) {
       if (choice?.finish_reason !== "tool_calls" && toolCalls.length === 0) {
         const plainText = getText(assistantMessage.content) || getText(assistantMessage.refusal) || getText(choice?.text);
         if (currentModel) {
-          finalAnswer = plainText;
-          completed = Boolean(finalAnswer.trim());
+          modelResponseText = plainText;
+          finalAnswer = "";
+          completed = Boolean(plainText.trim());
           break;
         }
 
@@ -824,13 +826,13 @@ export default async function handler(req, res) {
       return;
     }
 
-    if (hasSuccessfulWorkspaceAction && !finalAnswer.trim()) {
+    if ((hasSuccessfulWorkspaceAction || modelResponseText) && !finalAnswer.trim()) {
       const modelSummary = state.model ? JSON.stringify({
         name: state.model.name,
         units: state.model.units,
         structure: state.model.structure
       }).slice(0, 42000) : "No validated model exists yet; the user has issued display controls for the current demonstration viewport.";
-      const explanationPrompt = "Explain the work you actually completed in this BuildLens request. Be specific and concise. Do not claim engineering safety or checks that were not run. For a reconstructed model, report the validated element counts, what was omitted or unverified, and cite source filenames/pages from the observations. For display commands, confirm the exact visibility/opacity action. Current model data: " + modelSummary +
+      const explanationPrompt = "Explain the work you actually completed in this BuildLens request. Be specific and concise. Do not claim engineering safety or checks that were not run. For a reconstructed model, report the validated element counts, what was omitted or unverified, and cite source filenames/pages from the observations. For display commands, confirm the exact visibility/opacity action. Improve this prior draft if present, without inventing details: " + modelResponseText + "\\nCurrent model data: " + modelSummary +
         "\nRecorded source observations: " + JSON.stringify(state.findings).slice(0, 18000) +
         "\nRejected members: " + JSON.stringify(state.toolErrors).slice(0, 6000) +
         "\nExecuted actions: " + JSON.stringify(state.actions.map(action => ({ type: action.type, category: action.category, visible: action.visible, opacity: action.opacity, elementIds: action.elementIds })));
