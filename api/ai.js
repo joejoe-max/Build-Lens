@@ -65,7 +65,7 @@ const tools = [
     type: "function",
     function: {
       name: "record_drawing_observations",
-      description: "Record evidence extracted from uploaded drawings, schedules, sections and calculations before generating the 3D model. Include exact source filename and page for each observation. Record only values actually supported by the source. Use a separate observation for each important dimension, location, level, reinforcement callout or conflict.",
+      description: "Record evidence extracted from uploaded drawings, schedules, sections and calculations before generating the 3D model. Include exact source filename, page and discipline (architectural or structural) for each observation. Record only values actually supported by the source. Use a separate observation for each important dimension, location, level, reinforcement callout or conflict. When the drawing discipline is clear, set discipline to architectural or structural so matching element/property values can be cross-checked automatically.",
       parameters: {
         type: "object",
         additionalProperties: false,
@@ -82,6 +82,7 @@ const tools = [
               properties: {
                 sourceFile: { type: "string", minLength: 1 },
                 sourcePage: { type: "integer", minimum: 1 },
+                discipline: { type: "string", enum: ["architectural", "structural", "general"] },
                 category: { type: "string", enum: ["grid", "level", "column", "beam", "slab", "wall", "foundation", "reinforcement", "material", "load", "calculation", "general", "conflict", "missing_information"] },
                 elementId: { type: "string" },
                 property: { type: "string", minLength: 1 },
@@ -386,16 +387,54 @@ function executeTool(name, args, state) {
       }
       clean.push({
         sourceFile: item.sourceFile.slice(0, 180), sourcePage: item.sourcePage,
-        category: item.category, ...(item.elementId ? { elementId: String(item.elementId).slice(0, 100) } : {}),
+        category: item.category, ...(item.discipline ? { discipline: item.discipline } : {}), ...(item.elementId ? { elementId: String(item.elementId).slice(0, 100) } : {}),
         property: item.property.slice(0, 120), value: item.value, unit: item.unit.slice(0, 40),
         provenance: item.provenance, ...(item.confidence !== undefined ? { confidence: item.confidence } : {}),
         description: item.description.slice(0, 600), ...(item.sourceExcerpt ? { sourceExcerpt: String(item.sourceExcerpt).slice(0, 500) } : {})
       });
     }
-    state.findings.push(...clean);
+    const disciplineOf = item => {
+      if (item.discipline && item.discipline !== "general") return item.discipline;
+      if (/architect|architectural|\\barch\\b|\\bA[-_ ]?\\d{2,}/i.test(item.sourceFile)) return "architectural";
+      if (/structural|structure|\\bSTR\\b|\\bS[-_ ]?\\d{2,}/i.test(item.sourceFile)) return "structural";
+      return "general";
+    };
+    const lengthScale = { mm: 0.001, cm: 0.01, m: 1, ft: 0.3048 };
+    const conflicts = [];
+    const candidates = [...state.findings, ...clean].filter(item => item.elementId && item.category !== "conflict");
+    for (let i = 0; i < candidates.length; i++) {
+      for (let j = i + 1; j < candidates.length; j++) {
+        const a = candidates[i], b = candidates[j];
+        if (a.elementId !== b.elementId || a.property.toLowerCase() !== b.property.toLowerCase()) continue;
+        const da = disciplineOf(a), db = disciplineOf(b);
+        if (!((da === "architectural" && db === "structural") || (da === "structural" && db === "architectural"))) continue;
+        let differs = false;
+        if (typeof a.value === "number" && typeof b.value === "number") {
+          if (lengthScale[a.unit] && lengthScale[b.unit]) differs = Math.abs(a.value * lengthScale[a.unit] - b.value * lengthScale[b.unit]) > 0.001;
+          else if (a.unit === b.unit) differs = Math.abs(a.value - b.value) > 0.0001;
+        } else differs = String(a.value).trim().toLowerCase() !== String(b.value).trim().toLowerCase();
+        if (!differs) continue;
+        const architectural = da === "architectural" ? a : b;
+        const structural = da === "structural" ? a : b;
+        const key = architectural.elementId + "|" + architectural.property.toLowerCase() + "|" + structural.sourceFile + "|" + structural.sourcePage;
+        if (conflicts.some(item => item._key === key)) continue;
+        conflicts.push({
+          _key: key, sourceFile: architectural.sourceFile, sourcePage: architectural.sourcePage,
+          category: "conflict", elementId: architectural.elementId,
+          property: "Architectural/structural conflict: " + architectural.property,
+          value: String(architectural.value) + " " + architectural.unit + " vs " + String(structural.value) + " " + structural.unit,
+          unit: architectural.unit, provenance: "missing", confidence: Math.min(a.confidence ?? 0.8, b.confidence ?? 0.8),
+          description: "Architectural sheet " + architectural.sourceFile + " p." + architectural.sourcePage +
+            " differs from structural sheet " + structural.sourceFile + " p." + structural.sourcePage +
+            " for " + architectural.elementId + ". Confirm the governing design information before construction."
+        });
+      }
+    }
+    const conflictFindings = conflicts.map(({ _key, ...item }) => item);
+    state.findings.push(...clean, ...conflictFindings);
     state.findings = state.findings.slice(-500);
-    state.actions.push({ type: "document.observations.add", observations: clean });
-    return { ok: true, recorded: clean.length, totalObservations: state.findings.length };
+    state.actions.push({ type: "document.observations.add", observations: [...clean, ...conflictFindings] });
+    return { ok: true, recorded: clean.length, conflictsDetected: conflictFindings.length, totalObservations: state.findings.length };
   }
 
   if (name === "render_building_model" || name === "update_building_model") {
