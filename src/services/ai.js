@@ -29,7 +29,7 @@ export async function askBuildLens({ message, history = [], attachments = [], cu
 
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
-  let buffer = "", answer = "", completed = false, streamError = null;
+  let buffer = "", answer = "", completed = false, streamError = null, modelEventReceived = false;
   const handleEvent = frame => {
     let event = "message";
     const data = [];
@@ -42,12 +42,12 @@ export async function askBuildLens({ message, history = [], attachments = [], cu
     try { payload = JSON.parse(data.join("\n")); } catch { return; }
     if (event === "status") onStatus(payload.message || "BuildLens is working…");
     if (event === "delta" && typeof payload.text === "string") { answer += payload.text; onDelta(answer); }
-    if (event === "model") onActions({ actions: Array.isArray(payload.actions) ? payload.actions : [], model: payload.model ?? currentModel, findings: Array.isArray(payload.findings) ? payload.findings : [] });
+    if (event === "model") { modelEventReceived = true; onActions({ actions: Array.isArray(payload.actions) ? payload.actions : [], model: payload.model ?? currentModel, findings: Array.isArray(payload.findings) ? payload.findings : [] }); }
     if (event === "error") streamError = new Error(readableError(payload.error));
     if (event === "done") {
       completed = true;
       if (!answer && typeof payload.answer === "string") { answer = payload.answer; onDelta(answer); }
-      if (!payload.model && payload.actions?.length) onActions({ actions: payload.actions, model: currentModel, findings: payload.findings || [] });
+      if (!modelEventReceived && !payload.model && payload.actions?.length) onActions({ actions: payload.actions, model: currentModel, findings: payload.findings || [] });
     }
   };
   while (true) {
