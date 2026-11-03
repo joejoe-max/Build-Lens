@@ -137,7 +137,7 @@ const tools = [
         additionalProperties: false,
         required: ["category", "opacity"],
         properties: {
-          category: { type: "string", enum: ["columns", "beams", "slabs", "walls", "stairs", "foundations", "reinforcement", "all"] },
+          category: { type: "string", enum: ["columns", "beams", "slabs", "walls", "stairs", "foundations", "roofs", "reinforcement", "all"] },
           opacity: { type: "number", minimum: 0.05, maximum: 1 }
         }
       }
@@ -284,7 +284,7 @@ function normalizeReconstructionModel(input) {
   }];
   model.grids = Array.isArray(model.grids) ? model.grids : [];
   model.structure = model.structure && typeof model.structure === "object" ? model.structure : {};
-  const categories = ["columns", "beams", "slabs", "walls", "stairs", "foundations"];
+  const categories = ["columns", "beams", "slabs", "walls", "stairs", "foundations", "roofs"];
   for (const category of categories) if (!Array.isArray(model.structure[category])) model.structure[category] = [];
   const ensureProvenance = item => {
     if (item && typeof item === "object" && !item.provenance) item.provenance = { ...provenance };
@@ -355,7 +355,7 @@ function executeTool(name, args, state) {
     const rendered = executeTool("render_building_model", { model: normalized.model }, state);
     if (!rendered.ok) return rendered;
     const geometryCount = Object.entries(normalized.model.structure).reduce((sum, [key, value]) =>
-      sum + (["columns", "beams", "slabs", "walls", "stairs", "foundations"].includes(key) && Array.isArray(value) ? value.length : 0), 0);
+      sum + (["columns", "beams", "slabs", "walls", "stairs", "foundations", "roofs"].includes(key) && Array.isArray(value) ? value.length : 0), 0);
     return { ok: true, modelId: rendered.modelId, elementCounts: rendered.elementCounts, observationsRecorded: state.findings.length, geometryCount, rejectedMembers: normalized.rejected, partial: normalized.rejected.length > 0 };
   }
   if (args && typeof args.payload === "string") {
