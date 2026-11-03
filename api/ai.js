@@ -379,7 +379,7 @@ function executeTool(name, args, state) {
     for (const item of args.observations) {
       if (!item || typeof item.sourceFile !== "string" || !item.sourceFile.trim() ||
         !Number.isInteger(item.sourcePage) || item.sourcePage < 1 ||
-        !allowedCategories.includes(item.category) || typeof item.property !== "string" || !item.property.trim() ||
+        !allowedCategories.includes(item.category) || (item.discipline !== undefined && !["architectural", "structural", "general"].includes(item.discipline)) || typeof item.property !== "string" || !item.property.trim() ||
         !["string", "number", "boolean"].includes(typeof item.value) ||
         typeof item.unit !== "string" || !allowedProvenance.includes(item.provenance) ||
         typeof item.description !== "string" || !item.description.trim() ||
