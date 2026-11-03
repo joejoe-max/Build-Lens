@@ -470,18 +470,30 @@ export default function App() {
       // Keep the request comfortably below Vercel's function body limit.
       // Document text from every active project file is retained; only a
       // maximum of three compressed visual previews are sent per request.
+      const visualSelections = attachmentSnapshot.map(() => []);
       let remainingVisualPreviews = 10;
+      // Give every visual document one chance before distributing extra sheets
+      // round-robin, so an early multi-page PDF cannot crowd out later files.
+      for (let i = 0; i < attachmentSnapshot.length && remainingVisualPreviews > 0; i++) {
+        const item = attachmentSnapshot[i];
+        if (item.kind === "image" && typeof item.dataUrl === "string") visualSelections[i].push({ dataUrl: item.dataUrl });
+        else if (Array.isArray(item.pageImages) && item.pageImages.length) visualSelections[i].push(item.pageImages[0]);
+        if (visualSelections[i].length) remainingVisualPreviews--;
+      }
+      let added = true;
+      while (remainingVisualPreviews > 0 && added) {
+        added = false;
+        for (let i = 0; i < attachmentSnapshot.length && remainingVisualPreviews > 0; i++) {
+          const item = attachmentSnapshot[i];
+          if (!Array.isArray(item.pageImages)) continue;
+          const next = item.pageImages[visualSelections[i].length];
+          if (next) { visualSelections[i].push(next); remainingVisualPreviews--; added = true; }
+        }
+      }
       const textFileCount = Math.max(1, attachmentSnapshot.filter(file => typeof file.content === "string").length);
       const perDocumentTextBudget = Math.floor(480000 / textFileCount);
-      const requestAttachments = attachmentSnapshot.map(({ name, type, kind, content, dataUrl, pageImages }) => {
-        let visual = [];
-        if (remainingVisualPreviews > 0 && kind === "image" && typeof dataUrl === "string") {
-          visual = [{ dataUrl }];
-          remainingVisualPreviews -= 1;
-        } else if (remainingVisualPreviews > 0 && Array.isArray(pageImages)) {
-          visual = pageImages.slice(0, remainingVisualPreviews);
-          remainingVisualPreviews -= visual.length;
-        }
+      const requestAttachments = attachmentSnapshot.map(({ name, type, kind, content }, index) => {
+        const visual = visualSelections[index];
         return {
           name, type, kind,
           ...(typeof content === "string" ? { content: content.slice(0, perDocumentTextBudget) } : {}),
