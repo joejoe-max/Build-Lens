@@ -1,3 +1,17 @@
+function readableError(value) {
+  if (typeof value === "string" && value.trim()) return value;
+  if (value && typeof value === "object") {
+    if (typeof value.message === "string" && value.message.trim()) return value.message;
+    if (typeof value.error === "string" && value.error.trim()) return value.error;
+    if (value.error && typeof value.error === "object") return readableError(value.error);
+    if (Array.isArray(value.details) && value.details.length) {
+      return value.details.map(item => typeof item === "string" ? item : item?.message || JSON.stringify(item)).join("; ");
+    }
+    try { return JSON.stringify(value); } catch {}
+  }
+  return "The AI request failed.";
+}
+
 export async function askBuildLens({ message, history = [], attachments = [], currentModel = null, onDelta = () => {}, onActions = () => {} }) {
   const response = await fetch("/api/ai", {
     method: "POST",
@@ -18,9 +32,9 @@ export async function askBuildLens({ message, history = [], attachments = [], cu
       ". This usually means the request reached the frontend fallback instead of the Vercel function. Response: " + preview);
   }
 
-  if (!response.ok) throw new Error(payload?.error || "The AI request failed (HTTP " + response.status + ").");
+  if (!response.ok) throw new Error(readableError(payload?.error || payload?.details) || "The AI request failed (HTTP " + response.status + ").");
   if (typeof payload?.answer !== "string" || !payload.answer.trim()) {
-    throw new Error(payload?.error || "The AI endpoint returned JSON without an answer field.");
+    throw new Error(readableError(payload?.error) || "The AI endpoint returned JSON without an answer field.");
   }
 
   onActions({
