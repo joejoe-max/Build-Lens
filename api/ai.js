@@ -260,7 +260,7 @@ for (const tool of tools) {
 function normalizeReconstructionModel(input) {
   const model = JSON.parse(JSON.stringify(input));
   const provenance = { status: "unverified", note: "Value supplied by the model without explicit provenance; verify against source drawings." };
-  const measurementKeys = new Set(["width", "depth", "height", "thickness", "length", "spacing", "cover", "barDiameter", "diameter", "elevation", "positionFromStart", "sillHeight"]);
+  const measurementKeys = new Set(["width", "depth", "height", "thickness", "length", "spacing", "cover", "barDiameter", "diameter", "elevation", "eavesElevation", "rise", "positionFromStart", "sillHeight"]);
   const walk = value => {
     if (!value || typeof value !== "object") return;
     for (const [key, child] of Object.entries(value)) {
