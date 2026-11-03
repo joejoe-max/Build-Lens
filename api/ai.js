@@ -246,7 +246,7 @@ const tools = [
 // Reconstruction uses direct top-level model/observations arguments; other tools
 // retain the shallow payload adapter until their individual schemas are migrated.
 for (const tool of tools) {
-  if (["reconstruct_building", "set_model_visibility", "set_model_opacity", "inspect_model_element"].includes(tool.function.name)) continue;
+  if (["reconstruct_building", "record_drawing_observations", "set_model_visibility", "set_model_opacity", "inspect_model_element"].includes(tool.function.name)) continue;
   const original = tool.function.parameters;
   tool.function.description += "\n\nPass one argument named payload: a JSON-encoded string containing the complete arguments object. Payload shape: " + JSON.stringify(original);
   tool.function.parameters = {
