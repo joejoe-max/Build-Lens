@@ -72,6 +72,16 @@ function parseDxfDrawing(source) {
         geometry.push({ type: entity.type, layer, center: [x,y], radius });
         allPoints.push([x-radius,y-radius],[x+radius,y+radius]);
       }
+    } else if (entity.type === "INSERT" || entity.type === "POINT") {
+      const x = Number(value(entity, 10)), y = Number(value(entity, 20));
+      if ([x,y].every(Number.isFinite)) {
+        geometry.push({ type: entity.type, layer, point: [x,y], name: value(entity, 2) || "" });
+        allPoints.push([x,y]);
+      }
+    } else if (entity.type === "3DFACE") {
+      const points = [10,11,12,13].map(code => [Number(value(entity, code)), Number(value(entity, code+10))])
+        .filter(point => point.every(Number.isFinite));
+      if (points.length > 2) { geometry.push({ type: "POLYLINE", layer, points, closed: true }); allPoints.push(...points); }
     }
     if (["TEXT","MTEXT","ATTRIB","ATTDEF","DIMENSION"].includes(entity.type)) {
       const text = [...values(entity, 1), ...values(entity, 3)].join(" ").replace(/\\P/g, " ").trim();
@@ -98,7 +108,9 @@ function parseDxfDrawing(source) {
       ? (index+1) + ". " + item.layer + " LINE (" + item.points[0].join(",") + ") to (" + item.points[1].join(",") + ")"
       : item.type === "POLYLINE"
         ? (index+1) + ". " + item.layer + " POLYLINE " + item.points.map(point => point.join(",")).join("; ") + (item.closed ? " [closed]" : "")
-        : (index+1) + ". " + item.layer + " " + item.type + " center " + item.center.join(",") + " radius " + item.radius)
+        : item.type === "INSERT" || item.type === "POINT"
+          ? (index+1) + ". " + item.layer + " " + item.type + " " + (item.name || "") + " at " + item.point.join(",")
+          : (index+1) + ". " + item.layer + " " + item.type + " center " + item.center.join(",") + " radius " + item.radius)
   ].join("\n");
   return { summary, geometry, bounds, entityCount: entities.length, layerCount: layers.size };
 }
@@ -120,9 +132,13 @@ function renderCadPreview(parsed) {
     if (entity.type === "LINE" || entity.type === "POLYLINE") {
       entity.points.forEach((point,index) => { const p=project(point); if(index===0)context.moveTo(...p);else context.lineTo(...p); });
       if(entity.closed)context.closePath();
+    } else if (entity.type === "INSERT" || entity.type === "POINT") {
+      const point = project(entity.point);
+      context.moveTo(point[0]-4,point[1]); context.lineTo(point[0]+4,point[1]);
+      context.moveTo(point[0],point[1]-4); context.lineTo(point[0],point[1]+4);
     } else {
       const center=project(entity.center);
-      context.arc(center[0],center[1],entity.radius*scale,entity.type==="ARC"?0:0,entity.type==="ARC"?Math.PI*2:Math.PI*2);
+      context.arc(center[0],center[1],entity.radius*scale,0,Math.PI*2);
     }
     context.stroke();
   }
