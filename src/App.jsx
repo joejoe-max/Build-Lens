@@ -371,28 +371,6 @@ export default function App() {
           if (validation.valid) setModelSpec(parsed.modelSpec);
           else setNotice("A saved model was invalid and has been skipped. Your chat and uploaded files were preserved.");
         }
-        if (Array.isArray(parsed.modelActions)) {
-            const unique = new Map();
-            for (const action of parsed.modelActions) {
-              if (!action || !["model.visibility", "model.opacity"].includes(action.type)) continue;
-              const scope = (action.elementIds || []).slice().sort().join(",");
-              if (action.category === "all") {
-                for (const [key, existing] of unique) if (existing.type === action.type) unique.delete(key);
-              } else if (action.elementIds?.length) {
-                const ids = new Set(action.elementIds);
-                for (const [key, existing] of unique) {
-                  if (existing.type === action.type && existing.category === action.category &&
-                    (existing.elementIds || []).some(id => ids.has(id))) unique.delete(key);
-                }
-              } else {
-                for (const [key, existing] of unique) {
-                  if (existing.type === action.type && existing.category === action.category) unique.delete(key);
-                }
-              }
-              unique.set(action.type + "|" + action.category + "|" + scope, action);
-            }
-            setModelActions([...unique.values()].slice(-40));
-          }
         if (Array.isArray(parsed.drawingFindings)) setDrawingFindings(parsed.drawingFindings);
       }
     } catch { /* Ignore invalid local workspace data. */ }
@@ -404,9 +382,9 @@ export default function App() {
 
   useEffect(() => {
     try {
-      localStorage.setItem("buildlens-workspace-v2", JSON.stringify({ messages: messages.slice(-30), files, projectName, modelSpec, modelActions: modelActions.slice(-100), drawingFindings: drawingFindings.slice(-500) }));
+      localStorage.setItem("buildlens-workspace-v2", JSON.stringify({ messages: messages.slice(-30), files, projectName, modelSpec, drawingFindings: drawingFindings.slice(-500) }));
     } catch { setNotice("Workspace storage is full. Remove some files or export the workspace."); }
-  }, [messages, files, projectName, modelSpec, modelActions, drawingFindings]);
+  }, [messages, files, projectName, modelSpec, drawingFindings]);
 
   const addFiles = async event => {
     const selected = Array.from(event.target.files || []);
