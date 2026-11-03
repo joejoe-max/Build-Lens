@@ -47,7 +47,7 @@ const reconstructionTool = {
   type: "function",
   function: {
     name: "reconstruct_building",
-    description: "Reconstruct the uploaded building in one operation. Pass payload as a JSON-encoded string with shape {observations:[{sourceFile,sourcePage,category,property,value,unit,provenance,description,confidence?}],model:{schemaVersion,id,name,units,levels,grids,structure,metadata,...}}. Record source-page evidence and provide a complete model conforming to BuildLens schema 1.0.0. Use only drawing-supported dimensions. If details are absent, leave structural arrays empty and record missing_information observations; never invent geometry. The application validates the model and renders it in Three.js.",
+    description: "MANDATORY for every first-time 3D building reconstruction request: invoke this function instead of replying with a text-only promise. Reconstruct the uploaded building in one operation. Pass payload as a JSON-encoded string with shape {observations:[{sourceFile,sourcePage,category,property,value,unit,provenance,description,confidence?}],model:{schemaVersion,id,name,units,levels,grids,structure,metadata,...}}. Record source-page evidence and provide a complete model conforming to BuildLens schema 1.0.0. Use only drawing-supported dimensions. If details are absent, leave structural arrays empty and record missing_information observations; never invent geometry. The application validates the model and renders it in Three.js.",
     parameters: {
       type: "object",
       additionalProperties: false,
@@ -436,23 +436,38 @@ function executeTool(name, args, state) {
   return { ok: false, error: "Unknown tool." };
 }
 
-async function callMeta({ apiKey, messages, useTools = true, toolsToUse = tools }) {
-  const response = await fetch("https://api.meta.ai/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: "Bearer " + apiKey,
-      "Content-Type": "application/json",
-      Accept: "application/json"
-    },
-    body: JSON.stringify({
-      model: "muse-spark-1.3",
-      stream: false,
-      messages,
-      ...(useTools ? { tools: toolsToUse, tool_choice: "auto" } : {}),
-      max_completion_tokens: 6144,
-      reasoning_effort: "low"
-    })
-  });
+async function callMeta({ apiKey, messages, useTools = true, toolsToUse = tools, timeoutMs = 45000 }) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), Math.max(1000, timeoutMs));
+  let response;
+  try {
+    response = await fetch("https://api.meta.ai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer " + apiKey,
+        "Content-Type": "application/json",
+        Accept: "application/json"
+      },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model: "muse-spark-1.3",
+        stream: false,
+        messages,
+        ...(useTools ? { tools: toolsToUse, tool_choice: "auto", parallel_tool_calls: false } : {}),
+        max_completion_tokens: 6144,
+        reasoning_effort: "low"
+      })
+    });
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      const timeout = new Error("Meta AI took too long to interpret the drawings. The request was stopped before Vercel's execution limit; no model was reported as complete.");
+      timeout.status = 504;
+      throw timeout;
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
 
   const raw = await response.text();
   let payload;
@@ -532,23 +547,70 @@ export default async function handler(req, res) {
     let payload = null;
     let finalAnswer = "";
     let completed = false;
-    // New projects use one atomic reconstruction tool to avoid sequential
-    // evidence/model/explanation calls timing out the 60-second function.
+    const startedAt = Date.now();
+    const deadline = startedAt + 55000;
     const requestTools = currentModel ? tools : [reconstructionTool];
+    const maxTurns = currentModel ? 4 : 2;
 
-    for (let turn = 0; turn < (currentModel ? 4 : 1); turn++) {
-      payload = await callMeta({ apiKey, messages, toolsToUse: requestTools });
+    for (let turn = 0; turn < maxTurns; turn++) {
+      const remainingMs = deadline - Date.now();
+      if (remainingMs < 1500) break;
+      const requestStartedAt = Date.now();
+      payload = await callMeta({
+        apiKey,
+        messages,
+        toolsToUse: requestTools,
+        timeoutMs: remainingMs - 500
+      });
       const choice = payload?.choices?.[0];
       const assistantMessage = choice?.message || {};
       const toolCalls = Array.isArray(assistantMessage.tool_calls) ? assistantMessage.tool_calls : [];
+      console.info("BuildLens AI completion", {
+        turn: turn + 1,
+        elapsedMs: Date.now() - requestStartedAt,
+        finishReason: choice?.finish_reason || null,
+        toolCallCount: toolCalls.length,
+        hasModel: Boolean(state.model),
+        usage: payload?.usage || null
+      });
 
       if (choice?.finish_reason !== "tool_calls" && toolCalls.length === 0) {
-        finalAnswer = getText(assistantMessage.content) || getText(assistantMessage.refusal) || getText(choice?.text);
-        completed = true;
-        break;
+        const plainText = getText(assistantMessage.content) || getText(assistantMessage.refusal) || getText(choice?.text);
+        if (currentModel) {
+          finalAnswer = plainText;
+          completed = Boolean(finalAnswer.trim());
+          break;
+        }
+
+        // Muse Spark's Chat Completions tool_choice supports "auto" only.
+        // Retry once with an explicit correction rather than treating prose
+        // such as "Rebuilding..." as proof that a model was generated.
+        if (turn === 0 && deadline - Date.now() > 8000) {
+          messages.push({
+            role: "assistant",
+            content: plainText || ""
+          });
+          messages.push({
+            role: "user",
+            content: "Your previous response did not call reconstruct_building, so no 3D model exists yet. This request is specifically to generate the actual 3D model from the supplied project documents. Invoke reconstruct_building now with the evidence observations and a schema-valid model. Do not answer with a promise or a text description. If the documents genuinely do not contain enough readable geometry, still invoke the tool with only supported geometry and explicit missing-information observations; never invent dimensions."
+          });
+          continue;
+        }
+
+        console.error("BuildLens reconstruction returned no tool call", JSON.stringify({
+          finish_reason: choice?.finish_reason || null,
+          hasText: Boolean(plainText),
+          usage: payload?.usage || null
+        }));
+        return res.status(422).json({
+          error: "Meta AI returned a text response but did not invoke the building reconstruction function. No 3D model was generated. Please retry; if this repeats, the model provider is not following the required tool call.",
+          actions: [],
+          model: null,
+          findings: []
+        });
       }
 
-      // The full assistant tool-call message must be replayed before tool results.
+      // Replay the complete assistant tool-call message before tool results.
       messages.push({
         role: "assistant",
         content: assistantMessage.content || "",
@@ -568,7 +630,11 @@ export default async function handler(req, res) {
           result = { ok: false, error: "Tool arguments were not valid JSON. Please retry with valid structured arguments." };
         }
         if (!result?.ok) {
-          state.toolErrors.push({ tool: call.function?.name || "unknown", error: result?.error || "Tool execution failed.", details: result?.validationErrors || [] });
+          state.toolErrors.push({
+            tool: call.function?.name || "unknown",
+            error: result?.error || "Tool execution failed.",
+            details: result?.validationErrors || []
+          });
           state.toolErrors = state.toolErrors.slice(-12);
         }
         messages.push({ role: "tool", tool_call_id: call.id, content: JSON.stringify(result) });
@@ -577,46 +643,65 @@ export default async function handler(req, res) {
       if (!currentModel && state.model && state.actions.some(action => action.type === "model.replace")) {
         const counts = Object.fromEntries(Object.entries(state.model.structure || {}).map(([key, value]) => [key, Array.isArray(value) ? value.length : 0]));
         const total = Object.values(counts).reduce((sum, value) => sum + value, 0);
+        const geometryCount = ["columns", "beams", "slabs", "walls", "stairs", "foundations"]
+          .reduce((sum, key) => sum + (counts[key] || 0), 0);
         const detail = Object.entries(counts).filter(([, count]) => count).map(([category, count]) => count + " " + category).join(", ");
-        finalAnswer = "Drawing interpretation and model validation completed. I recorded " + state.findings.length +
-          " source observations and created a 3D model containing " + total + " structural elements (" + detail +
-          "). The model is now available in the viewport. Dimensions or reinforcement not supported by the uploaded pages remain unverified; this is a drawing reconstruction, not a structural safety certification.";
-        completed = true;
-        break;
+        if (geometryCount > 0 && validateBuildingModel(state.model).valid) {
+          finalAnswer = "Drawing interpretation and model validation completed. I recorded " + state.findings.length +
+            " source observations and created a 3D model containing " + geometryCount + " structural elements (" + detail +
+            "). The validated model data has been sent to the workspace renderer. Dimensions or reinforcement not supported by the uploaded pages remain unverified; this is a drawing reconstruction, not a structural safety certification.";
+          completed = true;
+          break;
+        }
       }
     }
 
-    if (!completed) {
-      // Give the model one final tool-free turn to explain the actual outcome.
-      // This prevents a generic safety-limit message from hiding a failed
-      // validation or leaving the user unaware that no model was created.
+    if (!currentModel && (!state.model || !state.actions.some(action => action.type === "model.replace"))) {
+      const errors = state.toolErrors.map(item => item.tool + ": " + item.error).join("; ");
+      console.error("BuildLens reconstruction incomplete", JSON.stringify({
+        elapsedMs: Date.now() - startedAt,
+        toolErrors: state.toolErrors.length,
+        actionTypes: state.actions.map(action => action.type),
+        hasModel: Boolean(state.model)
+      }));
+      return res.status(422).json({
+        error: errors
+          ? "The drawing was received, but model validation failed: " + errors + ". No 3D model was generated."
+          : "The drawing was received, but BuildLens could not complete the reconstruction within the request. No 3D model was reported as generated.",
+        actions: state.actions,
+        model: null,
+        findings: state.findings
+      });
+    }
+
+    if (!completed && currentModel) {
       const failureContext = state.toolErrors.length
         ? "\\nTool execution failures: " + JSON.stringify(state.toolErrors).slice(0, 12000)
-        : "\\nThe tool-call sequence exceeded eight rounds. Completed actions: " + JSON.stringify(state.actions.map(action => action.type));
+        : "\\nThe tool-call sequence reached its configured turn limit. Completed actions: " + JSON.stringify(state.actions.map(action => action.type));
       try {
         const closing = await callMeta({
           apiKey,
           messages: [...messages, {
             role: "user",
-            content: "Stop calling tools. Give the user a concise, truthful status report. State explicitly whether a 3D model was actually created. Explain the tool failures or unfinished step using this execution information: " + failureContext + ". Do not claim that a model exists unless a successful render_building_model or update_building_model action completed."
+            content: "Stop calling tools. Give the user a concise, truthful status report. State explicitly whether the existing 3D model was updated. Explain the tool failures or unfinished step using this execution information: " + failureContext + ". Do not claim an update unless a successful model action completed."
           }],
-          useTools: false
+          useTools: false,
+          timeoutMs: Math.max(1000, deadline - Date.now() - 500)
         });
-        const closingChoice = closing?.choices?.[0];
-        finalAnswer = getText(closingChoice?.message?.content) || "";
+        finalAnswer = getText(closing?.choices?.[0]?.message?.content) || "";
         completed = Boolean(finalAnswer.trim());
       } catch (closingError) {
         console.error("BuildLens final status generation failed:", closingError?.name || "Error");
       }
       if (!completed) {
         finalAnswer = state.toolErrors.length
-          ? "I could not complete the 3D reconstruction. The model-generation tools returned errors: " + state.toolErrors.map(item => item.tool + ": " + item.error).join("; ")
-          : "I could not complete the 3D reconstruction because the AI kept requesting additional tool operations. No new model was confirmed.";
+          ? "I could not complete the requested model update. The model-generation tools returned errors: " + state.toolErrors.map(item => item.tool + ": " + item.error).join("; ")
+          : "I could not complete the requested model update. No successful model update was confirmed.";
       }
     }
 
-    if (!finalAnswer.trim() && state.actions.length) {
-      finalAnswer = "I've prepared the requested model operation. The structured model data has been validated and returned to the workspace.";
+    if (!finalAnswer.trim() && state.actions.length && (currentModel || state.model)) {
+      finalAnswer = "The validated model operation was returned to the workspace.";
     }
     if (!finalAnswer.trim()) {
       console.error("Meta API returned an empty answer:", JSON.stringify({
@@ -634,7 +719,11 @@ export default async function handler(req, res) {
       findings: state.findings
     });
   } catch (error) {
-    console.error("BuildLens Meta request failed:", error?.name || "Error");
+    console.error("BuildLens Meta request failed:", JSON.stringify({
+      name: error?.name || "Error",
+      status: error?.status || 502,
+      message: String(error?.message || "Unknown error").slice(0, 500)
+    }));
     return res.status(error.status || 502).json({ error: error.message || "Could not reach Meta AI. Check the connection and try again." });
   }
 }
