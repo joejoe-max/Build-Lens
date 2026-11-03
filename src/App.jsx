@@ -509,9 +509,12 @@ export default function App() {
               for (const action of workspaceActions) {
                 const scope = (action.elementIds || []).slice().sort().join(",");
                 if (action.category === "all") next = next.filter(existing => existing.type !== action.type);
-                else next = next.filter(existing => !(existing.type === action.type &&
-                  existing.category === action.category &&
-                  (existing.elementIds || []).slice().sort().join(",") === scope));
+                else if (action.elementIds?.length) {
+                  const ids = new Set(action.elementIds);
+                  next = next.filter(existing => !(existing.type === action.type &&
+                    existing.category === action.category &&
+                    (existing.elementIds || []).some(id => ids.has(id))));
+                } else next = next.filter(existing => !(existing.type === action.type && existing.category === action.category));
                 next.push(action);
               }
               return next.slice(-40);
