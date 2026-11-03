@@ -12,7 +12,7 @@ import { validateBuildingModel } from "./domain/buildingModel.js";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
-const MAX_FILE_SIZE = 12 * 1024 * 1024;
+const MAX_FILE_SIZE = 25 * 1024 * 1024;
 const textExtensions = ["txt", "md", "csv", "json", "xml"];
 
 let dwgConverterPromise = null;
@@ -409,7 +409,7 @@ export default function App() {
     const next = [];
     const failures = [];
     for (const file of selected) {
-      if (file.size > MAX_FILE_SIZE) { failures.push(`${file.name}: exceeds 12 MB`); continue; }
+      if (file.size > MAX_FILE_SIZE) { failures.push(`${file.name}: exceeds 25 MB`); continue; }
       try {
         const attachment = await readAttachment(file);
         next.push(attachment);
