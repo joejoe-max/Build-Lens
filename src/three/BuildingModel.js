@@ -311,7 +311,8 @@ function createSample(scene, MATERIALS) {
     addCylinderBetween(
       group, elements, new THREE.Vector3(...a), new THREE.Vector3(...b),
       diameter, id,
-      { ownerId: owner, ownerName: owner, reinforcementType: type, provenance: "illustrative demo geometry" }
+      { ownerId: owner, ownerName: owner, reinforcementType: type, provenance: "illustrative demo geometry" },
+      MATERIALS
     );
   };
   const xs = [-3, 0, 3], zs = [-2.5, 0, 2.5], ys = [0.18, 3.18, 6.18];
