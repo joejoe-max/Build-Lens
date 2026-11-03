@@ -3,7 +3,7 @@ import { ChevronDown, CircleAlert, CheckCircle2, FileSearch } from "lucide-react
 
 const statusLabel = status => status ? status.charAt(0).toUpperCase() + status.slice(1) : "Unverified";
 
-export default function AssumptionPanel({ open, onToggle, modelSpec = null, findings = [] }) {
+export default function AssumptionPanel({ open, onToggle, modelSpec = null, findings = [], onSelectFinding = () => {} }) {
   const counts = findings.reduce((result, item) => {
     result[item.provenance] = (result[item.provenance] || 0) + 1;
     return result;
@@ -26,11 +26,16 @@ export default function AssumptionPanel({ open, onToggle, modelSpec = null, find
         <div className="assumption-item"><span className="status-chip assumed">Unverified / missing</span><strong>{(counts.unverified || 0) + (counts.missing || 0) + (counts.assumed || 0)}</strong><p>Values requiring confirmation or additional information.</p></div>
       </div>
       <div className="evidence-summary"><FileSearch size={15} /><span>{findings.length} drawing observations recorded</span></div>
-      {findings.slice(-8).reverse().map((item,index) => <div className="evidence-row" key={item.sourceFile + item.sourcePage + item.property + index}>
-        <div><strong>{item.property}</strong><span>{item.sourceFile} · p. {item.sourcePage}</span></div>
-        <span className="evidence-value">{String(item.value)} {item.unit}</span>
-        <small>{statusLabel(item.provenance)}{item.confidence !== undefined ? ` · ${Math.round(item.confidence*100)}% confidence` : ""}</small>
-      </div>)}
+      {findings.slice(-8).reverse().map((item,index) => {
+        const Row = item.elementId ? "button" : "div";
+        return <Row className={item.elementId ? "evidence-row evidence-row-selectable" : "evidence-row"} key={item.sourceFile + item.sourcePage + item.property + index}
+          onClick={item.elementId ? () => onSelectFinding(item) : undefined}
+          title={item.elementId ? "Select " + item.elementId + " in the 3D model" : undefined}>
+          <div><strong>{item.property}</strong><span>{item.sourceFile} · p. {item.sourcePage}</span></div>
+          <span className="evidence-value">{String(item.value)} {item.unit}</span>
+          <small>{statusLabel(item.provenance)}{item.confidence !== undefined ? ` · ${Math.round(item.confidence*100)}% confidence` : ""}{item.elementId ? " · " + item.elementId : ""}</small>
+        </Row>;
+      })}
     </>}
   </section>;
 }
