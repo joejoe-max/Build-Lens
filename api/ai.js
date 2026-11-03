@@ -582,7 +582,8 @@ export default async function handler(req, res) {
     for (let turn = 0; turn < maxTurns; turn++) {
       const remainingMs = deadline - Date.now();
       if (remainingMs < 1500) break;
-      sendEvent('status', { message: currentModel ? 'Interpreting your instruction and preparing the model update.' : 'Interpreting drawings and preparing the building reconstruction.' });\n      const requestStartedAt = Date.now();
+      sendEvent('status', { message: currentModel ? 'Interpreting your instruction and preparing the model update.' : 'Interpreting drawings and preparing the building reconstruction.' });
+      const requestStartedAt = Date.now();
       payload = await callMeta({
         apiKey,
         messages,
@@ -634,7 +635,9 @@ export default async function handler(req, res) {
         return;
       }
 
-      sendEvent('status', { message: 'Applying and validating the AI reconstruction instructions.' });\n\n      // Replay the complete assistant tool-call message before tool results.
+      sendEvent('status', { message: 'Applying and validating the AI reconstruction instructions.' });
+
+      // Replay the complete assistant tool-call message before tool results.
       messages.push({
         role: "assistant",
         content: assistantMessage.content || "",
@@ -664,7 +667,9 @@ export default async function handler(req, res) {
         messages.push({ role: "tool", tool_call_id: call.id, content: JSON.stringify(result) });
       }
 
-      if (state.actions.length) sendEvent('model', { actions: state.actions, model: state.model, findings: state.findings });\n\n      if (!currentModel && state.model && state.actions.some(action => action.type === "model.replace")) {
+      if (state.actions.length) sendEvent('model', { actions: state.actions, model: state.model, findings: state.findings });
+
+      if (!currentModel && state.model && state.actions.some(action => action.type === "model.replace")) {
         const counts = Object.fromEntries(Object.entries(state.model.structure || {}).map(([key, value]) => [key, Array.isArray(value) ? value.length : 0]));
         const total = Object.values(counts).reduce((sum, value) => sum + value, 0);
         const geometryCount = ["columns", "beams", "slabs", "walls", "stairs", "foundations"]
