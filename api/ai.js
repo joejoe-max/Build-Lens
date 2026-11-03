@@ -298,24 +298,23 @@ function normalizeReconstructionModel(input) {
   model.levels.forEach(ensureProvenance);
   model.grids.forEach(ensureProvenance);
   for (const category of categories) model.structure[category].forEach(ensureProvenance);
+  const rejected = [];
   for (const category of categories) {
     const accepted = [];
+    const seenIds = new Set();
     const items = model.structure[category];
     for (const item of items) {
+      if (!item?.id || seenIds.has(item.id)) {
+        rejected.push({ category, id: item?.id || null, reason: seenIds.has(item?.id) ? "duplicate_id" : "missing_id" });
+        continue;
+      }
       const candidate = { ...model, structure: { ...model.structure, [category]: [item] } };
       const result = validateBuildingModel(candidate);
       const ownErrors = result.errors.filter(error => error.includes("structure." + category + "[0]"));
-      if (!ownErrors.length) accepted.push(item);
+      if (ownErrors.length) rejected.push({ category, id: item.id, reason: ownErrors.slice(0, 4).join("; ") });
+      else { accepted.push(item); seenIds.add(item.id); }
     }
     model.structure[category] = accepted;
-  }
-  const rejected = [];
-  // Preserve a clean member-by-member result while the complete model validator
-  // continues to enforce cross-references and project-level consistency.
-  for (const category of categories) {
-    const originalItems = Array.isArray(input.structure?.[category]) ? input.structure[category] : [];
-    const acceptedIds = new Set(model.structure[category].map(item => item.id));
-    for (const item of originalItems) if (!acceptedIds.has(item?.id)) rejected.push({ category, id: item?.id || null });
   }
   return { model, rejected };
 }
