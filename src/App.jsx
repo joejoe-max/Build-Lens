@@ -15,6 +15,162 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 const MAX_FILE_SIZE = 12 * 1024 * 1024;
 const textExtensions = ["txt", "md", "csv", "json", "xml"];
 
+let dwgConverterPromise = null;
+
+function parseDxfDrawing(source) {
+  const lines = source.replace(/\r/g, "").split("\n");
+  const pairs = [];
+  for (let i = 0; i + 1 < lines.length; i += 2) {
+    const code = Number.parseInt(lines[i].trim(), 10);
+    if (Number.isFinite(code)) pairs.push({ code, value: lines[i + 1].trim() });
+  }
+  const entities = [];
+  let inEntities = false;
+  let current = null;
+  for (let i = 0; i < pairs.length; i++) {
+    const pair = pairs[i];
+    if (pair.code === 0 && pair.value === "SECTION" && pairs[i + 1]?.code === 2) {
+      inEntities = pairs[i + 1].value === "ENTITIES";
+      current = null;
+      continue;
+    }
+    if (pair.code === 0 && pair.value === "ENDSEC") {
+      inEntities = false; current = null; continue;
+    }
+    if (!inEntities) continue;
+    if (pair.code === 0) {
+      current = { type: pair.value, data: [] };
+      entities.push(current);
+    } else if (current) current.data.push(pair);
+  }
+  const value = (entity, code) => entity.data.find(item => item.code === code)?.value;
+  const values = (entity, code) => entity.data.filter(item => item.code === code).map(item => item.value);
+  const counts = {};
+  const layers = new Map();
+  const geometry = [];
+  const labels = [];
+  const allPoints = [];
+  for (const entity of entities) {
+    counts[entity.type] = (counts[entity.type] || 0) + 1;
+    const layer = value(entity, 8) || "0";
+    layers.set(layer, (layers.get(layer) || 0) + 1);
+    const nums = code => values(entity, code).map(Number).filter(Number.isFinite);
+    if (entity.type === "LINE") {
+      const x1 = Number(value(entity, 10)), y1 = Number(value(entity, 20));
+      const x2 = Number(value(entity, 11)), y2 = Number(value(entity, 21));
+      if ([x1,y1,x2,y2].every(Number.isFinite)) {
+        const item = { type: "LINE", layer, points: [[x1,y1],[x2,y2]] };
+        geometry.push(item); allPoints.push(...item.points);
+      }
+    } else if (entity.type === "LWPOLYLINE" || entity.type === "POLYLINE") {
+      const xs = nums(10), ys = nums(20);
+      const points = xs.map((x, i) => [x, ys[i]]).filter(point => Number.isFinite(point[1]));
+      if (points.length > 1) { geometry.push({ type: "POLYLINE", layer, points, closed: (Number(value(entity, 70)) & 1) === 1 }); allPoints.push(...points); }
+    } else if (entity.type === "CIRCLE" || entity.type === "ARC") {
+      const x = Number(value(entity, 10)), y = Number(value(entity, 20)), radius = Number(value(entity, 40));
+      if ([x,y,radius].every(Number.isFinite) && radius > 0) {
+        geometry.push({ type: entity.type, layer, center: [x,y], radius });
+        allPoints.push([x-radius,y-radius],[x+radius,y+radius]);
+      }
+    }
+    if (["TEXT","MTEXT","ATTRIB","ATTDEF","DIMENSION"].includes(entity.type)) {
+      const text = [...values(entity, 1), ...values(entity, 3)].join(" ").replace(/\\P/g, " ").trim();
+      if (text) labels.push({ layer, type: entity.type, text });
+    }
+  }
+  const bounds = allPoints.length ? {
+    minX: Math.min(...allPoints.map(point => point[0])),
+    minY: Math.min(...allPoints.map(point => point[1])),
+    maxX: Math.max(...allPoints.map(point => point[0])),
+    maxY: Math.max(...allPoints.map(point => point[1]))
+  } : null;
+  const summary = [
+    "CAD drawing entity extraction (DXF)",
+    "Units: not reliably declared in this text summary; confirm drawing INSUNITS/dimensions before using numeric values.",
+    "Entity count: " + entities.length,
+    "Entity types: " + Object.entries(counts).map(([key,count]) => key + "=" + count).join(", "),
+    "Layers: " + [...layers.entries()].map(([key,count]) => key + " (" + count + ")").join(", "),
+    bounds ? "2D extents: X " + bounds.minX + " to " + bounds.maxX + "; Y " + bounds.minY + " to " + bounds.maxY : "No supported 2D geometry entities were extracted.",
+    "Text and dimension labels:",
+    ...labels.slice(0, 500).map(item => "[" + item.layer + " · " + item.type + "] " + item.text),
+    "Representative geometry by layer:",
+    ...geometry.slice(0, 900).map((item,index) => item.type === "LINE"
+      ? (index+1) + ". " + item.layer + " LINE (" + item.points[0].join(",") + ") to (" + item.points[1].join(",") + ")"
+      : item.type === "POLYLINE"
+        ? (index+1) + ". " + item.layer + " POLYLINE " + item.points.map(point => point.join(",")).join("; ") + (item.closed ? " [closed]" : "")
+        : (index+1) + ". " + item.layer + " " + item.type + " center " + item.center.join(",") + " radius " + item.radius)
+  ].join("\n");
+  return { summary, geometry, bounds, entityCount: entities.length, layerCount: layers.size };
+}
+
+function renderCadPreview(parsed) {
+  if (!parsed.bounds || !parsed.geometry.length) return null;
+  const width = 900, height = 650, padding = 35;
+  const canvas = document.createElement("canvas");
+  canvas.width = width; canvas.height = height;
+  const context = canvas.getContext("2d");
+  context.fillStyle = "#11161a"; context.fillRect(0, 0, width, height);
+  const b = parsed.bounds;
+  const spanX = Math.max(1e-6, b.maxX - b.minX), spanY = Math.max(1e-6, b.maxY - b.minY);
+  const scale = Math.min((width-padding*2)/spanX,(height-padding*2)/spanY);
+  const project = point => [padding+(point[0]-b.minX)*scale,height-padding-(point[1]-b.minY)*scale];
+  context.strokeStyle = "#d8e0e5"; context.lineWidth = 1;
+  for (const entity of parsed.geometry) {
+    context.beginPath();
+    if (entity.type === "LINE" || entity.type === "POLYLINE") {
+      entity.points.forEach((point,index) => { const p=project(point); if(index===0)context.moveTo(...p);else context.lineTo(...p); });
+      if(entity.closed)context.closePath();
+    } else {
+      const center=project(entity.center);
+      context.arc(center[0],center[1],entity.radius*scale,entity.type==="ARC"?0:0,entity.type==="ARC"?Math.PI*2:Math.PI*2);
+    }
+    context.stroke();
+  }
+  const dataUrl=canvas.toDataURL("image/jpeg",0.42);
+  canvas.width=0;canvas.height=0;
+  return dataUrl.length<=260000?dataUrl:null;
+}
+
+async function readCadAttachment(file, extension) {
+  let dxfText;
+  if (extension === "dwg") {
+    const dwg = await file.arrayBuffer();
+    const converter = await import("dwgdxf");
+    if (!dwgConverterPromise) dwgConverterPromise = converter.init();
+    await dwgConverterPromise;
+    const converted = await converter.convertDwgToDxf(new Uint8Array(dwg));
+    dxfText = new TextDecoder().decode(converted);
+  } else {
+    dxfText = await file.text();
+  }
+  if (!dxfText || !dxfText.includes("SECTION")) throw new Error(file.name + " could not be decoded as a supported ASCII DXF drawing.");
+  const parsed = parseDxfDrawing(dxfText);
+  if (!parsed.entityCount) throw new Error(file.name + " contains no readable model-space entities.");
+  const preview = renderCadPreview(parsed);
+  return {
+    id: crypto.randomUUID(), name: file.name, type: "text/plain", kind: "text",
+    content: parsed.summary.slice(0,120000),
+    ...(preview ? { pageImages: [{ pageNumber: 1, dataUrl: preview }] } : {}),
+    status: (extension === "dwg" ? "DWG converted and " : "DXF ") + parsed.entityCount + " CAD entities read across " + parsed.layerCount + " layers"
+  };
+}
+
+async function readSpreadsheetAttachment(file) {
+  const XLSX = await import("xlsx");
+  const workbook = XLSX.read(await file.arrayBuffer(), { type: "array", cellDates: true, cellFormula: true });
+  const sheets = workbook.SheetNames.map(name => {
+    const sheet = workbook.Sheets[name];
+    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: "" });
+    const values = rows.map((row,index) => String(index+1).padStart(3,"0") + " | " + row.map(cell => String(cell ?? "")).join(" | ")).join("\n");
+    const formulas = XLSX.utils.sheet_to_formulae(sheet);
+    const formulaText = formulas.length ? "\nFormulas:\n" + formulas.slice(0,500).join("\n") : "";
+    return "[Worksheet: " + name + "]\n" + values + formulaText;
+  });
+  const content = sheets.join("\n\n").slice(0,120000);
+  if (!content.trim()) throw new Error(file.name + " contains no readable worksheet data.");
+  return { id: crypto.randomUUID(), name: file.name, type: file.type || "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", kind: "text", content, status: "Read " + workbook.SheetNames.length + " spreadsheet sheet(s), including table rows and formulas" };
+}
+
 async function readAttachment(file) {
   const extension = file.name.split(".").pop().toLowerCase();
   if (file.type.startsWith("image/") && ["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
@@ -30,6 +186,8 @@ async function readAttachment(file) {
     if (dataUrl.length > 350000) throw new Error(`${file.name} could not be compressed small enough. Try a smaller image.`);
     return { id: crypto.randomUUID(), name: file.name, type: "image/jpeg", kind: "image", dataUrl, status: "Image ready to analyse" };
   }
+  if (["dwg", "dxf"].includes(extension)) return readCadAttachment(file, extension);
+  if (["xls", "xlsx", "ods"].includes(extension)) return readSpreadsheetAttachment(file);
   if (extension === "pdf" || file.type === "application/pdf") {
     const pdf = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
     const pageRecords = [];
@@ -127,7 +285,7 @@ async function readAttachment(file) {
   if (textExtensions.includes(extension) || file.type.startsWith("text/")) {
     return { id: crypto.randomUUID(), name: file.name, type: file.type || "text/plain", kind: "text", content: (await file.text()).slice(0, 120000), status: "Text ready to analyse" };
   }
-  throw new Error(`${file.name}: this format is not supported yet. Use PDF, DOCX, TXT, CSV, JSON, PNG, JPG or WEBP.`);
+  throw new Error(`${file.name}: this format is not supported yet. Use PDF, DOCX, DWG, DXF, XLS, XLSX, ODS, TXT, CSV, JSON, PNG, JPG or WEBP.`);
 }
 
 const ATTACHMENT_DB = "buildlens-project-files";
