@@ -395,8 +395,8 @@ function executeTool(name, args, state) {
     }
     const disciplineOf = item => {
       if (item.discipline && item.discipline !== "general") return item.discipline;
-      if (/architect|architectural|\\barch\\b|\\bA[-_ ]?\\d{2,}/i.test(item.sourceFile)) return "architectural";
-      if (/structural|structure|\\bSTR\\b|\\bS[-_ ]?\\d{2,}/i.test(item.sourceFile)) return "structural";
+      if (/architect|architectural|\barch\b|\bA[-_ ]?\\d{2,}/i.test(item.sourceFile)) return "architectural";
+      if (/structural|structure|\bSTR\b|\bS[-_ ]?\\d{2,}/i.test(item.sourceFile)) return "structural";
       return "general";
     };
     const lengthScale = { mm: 0.001, cm: 0.01, m: 1, ft: 0.3048 };
@@ -417,7 +417,7 @@ function executeTool(name, args, state) {
         const architectural = da === "architectural" ? a : b;
         const structural = da === "structural" ? a : b;
         const key = architectural.elementId + "|" + architectural.property.toLowerCase() + "|" + structural.sourceFile + "|" + structural.sourcePage;
-        if (conflicts.some(item => item._key === key)) continue;
+        if (conflicts.some(item => item._key === key) || state.findings.some(item => item.category === "conflict" && item.elementId === architectural.elementId && item.property.toLowerCase().includes(architectural.property.toLowerCase()))) continue;
         conflicts.push({
           _key: key, sourceFile: architectural.sourceFile, sourcePage: architectural.sourcePage,
           category: "conflict", elementId: architectural.elementId,
