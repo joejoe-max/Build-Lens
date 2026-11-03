@@ -130,6 +130,22 @@ const tools = [
   {
     type: "function",
     function: {
+      name: "set_model_opacity",
+      description: "Set the opacity of a structural category in the active 3D workspace. Use when the user asks to make the structural frame more or less visible. Opacity is between 0.05 (very transparent) and 1 (fully opaque).",
+      parameters: {
+        type: "object",
+        additionalProperties: false,
+        required: ["category", "opacity"],
+        properties: {
+          category: { type: "string", enum: ["columns", "beams", "slabs", "walls", "stairs", "foundations", "reinforcement", "all"] },
+          opacity: { type: "number", minimum: 0.05, maximum: 1 }
+        }
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
       name: "set_model_visibility",
       description: "Show or hide one structural category or selected elements in the 3D viewport. Use for requests such as show only reinforcement, hide slabs, or isolate columns.",
       parameters: {
@@ -394,6 +410,16 @@ function executeTool(name, args, state) {
     return { ok: true, modelId: proposedModel.id, elementCounts: Object.fromEntries(Object.entries(proposedModel.structure).map(([key, value]) => [key, Array.isArray(value) ? value.length : 0])), message: "The model passed structural data validation and is ready for the 3D renderer." };
   }
 
+  if (name === "set_model_opacity") {
+    const allowed = ["columns", "beams", "slabs", "walls", "stairs", "foundations", "reinforcement", "all"];
+    if (!allowed.includes(args.category) || !Number.isFinite(args.opacity) || args.opacity < 0.05 || args.opacity > 1) {
+      return { ok: false, error: "Opacity must be between 0.05 and 1 for a supported model category." };
+    }
+    const action = { type: "model.opacity", category: args.category, opacity: args.opacity };
+    state.actions.push(action);
+    return { ok: true, action };
+  }
+
   if (name === "set_model_visibility") {
     const allowed = ["foundations", "columns", "beams", "slabs", "walls", "stairs", "reinforcement", "grids", "all"];
     if (!allowed.includes(args.category) || typeof args.visible !== "boolean") return { ok: false, error: "Invalid visibility arguments." };
@@ -498,7 +524,7 @@ function executeTool(name, args, state) {
   return { ok: false, error: "Unknown tool." };
 }
 
-async function callMeta({ apiKey, messages, useTools = true, toolsToUse = tools, timeoutMs = 45000 }) {
+async function callMeta({ apiKey, messages, useTools = true, toolsToUse = tools, timeoutMs = 45000, stream = false, onDelta = () => {}, maxCompletionTokens = 12288 }) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), Math.max(1000, timeoutMs));
   try {
@@ -507,24 +533,52 @@ async function callMeta({ apiKey, messages, useTools = true, toolsToUse = tools,
       headers: {
         Authorization: "Bearer " + apiKey,
         "Content-Type": "application/json",
-        Accept: "application/json"
+        Accept: stream ? "text/event-stream" : "application/json"
       },
       signal: controller.signal,
       body: JSON.stringify({
         model: "muse-spark-1.3",
-        stream: false,
+        stream,
         messages,
         ...(useTools ? { tools: toolsToUse, tool_choice: "auto", parallel_tool_calls: false } : {}),
-        max_completion_tokens: 12288,
+        max_completion_tokens: maxCompletionTokens,
         reasoning_effort: "low"
       })
     });
-
-    // Keep the abort timer active until the complete response body is read.
-    const raw = await response.text();
     let payload;
-    try { payload = raw ? JSON.parse(raw) : null; }
-    catch { throw new Error("Meta AI returned an unreadable response."); }
+    if (stream && response.ok) {
+      if (!response.body) throw new Error("Meta AI opened a stream without a response body.");
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "", answer = "";
+      const consume = frame => {
+        for (const line of frame.split(/\r?\n/)) {
+          if (!line.startsWith("data:")) continue;
+          const raw = line.slice(5).trim();
+          if (!raw || raw === "[DONE]") continue;
+          try {
+            const event = JSON.parse(raw);
+            const delta = event.choices?.[0]?.delta?.content;
+            if (typeof delta === "string" && delta) { answer += delta; onDelta(delta); }
+          } catch { /* Ignore non-JSON keep-alive frames. */ }
+        }
+      };
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const frames = buffer.split(/\r?\n\r?\n/);
+        buffer = frames.pop() || "";
+        frames.forEach(consume);
+      }
+      buffer += decoder.decode();
+      if (buffer.trim()) consume(buffer);
+      payload = { choices: [{ message: { content: answer }, finish_reason: "stop" }] };
+    } else {
+      const raw = await response.text();
+      try { payload = raw ? JSON.parse(raw) : null; }
+      catch { throw new Error("Meta AI returned an unreadable response."); }
+    }
 
     if (!response.ok) {
       const providerMessage = payload?.error?.message || payload?.message;
@@ -648,7 +702,10 @@ export default async function handler(req, res) {
     let completed = false;
     const startedAt = Date.now();
     const deadline = startedAt + 285000;
-    const requestTools = currentModel ? tools : [reconstructionTool];
+    const requestTools = currentModel ? tools : [
+      reconstructionTool,
+      ...tools.filter(tool => ["set_model_visibility", "set_model_opacity"].includes(tool.function.name))
+    ];
     const maxTurns = currentModel ? 3 : 3;
 
     for (let turn = 0; turn < maxTurns; turn++) {
@@ -738,16 +795,21 @@ export default async function handler(req, res) {
           .reduce((sum, key) => sum + (counts[key] || 0), 0);
         const detail = Object.entries(counts).filter(([, count]) => count).map(([category, count]) => count + " " + category).join(", ");
         if (validateBuildingModel(state.model).valid) {
-          finalAnswer = "Drawing interpretation and model validation completed. I recorded " + state.findings.length +
-            " source observations and retained " + geometryCount + " validated structural elements (" + detail +
-            "). Invalid individual members were omitted rather than discarding the entire reconstruction. The model data has been sent to the workspace renderer. Dimensions or reinforcement not supported by the uploaded pages remain unverified; this is a drawing reconstruction, not a structural safety certification.";
+          finalAnswer = "";
           completed = true;
           break;
         }
       }
+      if (!currentModel && !state.model && state.actions.some(action => ["model.visibility", "model.opacity"].includes(action.type))) {
+        completed = true;
+        break;
+      }
     }
 
-    if (!currentModel && (!state.model || !state.actions.some(action => action.type === "model.replace"))) {
+    const hasSuccessfulWorkspaceAction = state.actions.some(action =>
+      ["model.replace", "model.visibility", "model.opacity", "model.reinforcement.add", "model.element.update"].includes(action.type));
+    if (!currentModel && (!state.model || !state.actions.some(action => action.type === "model.replace")) &&
+        !state.actions.some(action => ["model.visibility", "model.opacity"].includes(action.type))) {
       const errors = state.toolErrors.map(item => item.tool + ": " + item.error).join("; ");
       console.error("BuildLens reconstruction incomplete", JSON.stringify({
         elapsedMs: Date.now() - startedAt,
@@ -762,30 +824,44 @@ export default async function handler(req, res) {
       return;
     }
 
-    if (!completed && currentModel) {
-      const failureContext = state.toolErrors.length
-        ? "\nTool execution failures: " + JSON.stringify(state.toolErrors).slice(0, 12000)
-        : "\nThe tool-call sequence reached its configured turn limit. Completed actions: " + JSON.stringify(state.actions.map(action => action.type));
+    if (hasSuccessfulWorkspaceAction && !finalAnswer.trim()) {
+      const modelSummary = state.model ? JSON.stringify({
+        name: state.model.name,
+        units: state.model.units,
+        structure: state.model.structure
+      }).slice(0, 42000) : "No validated model exists yet; the user has issued display controls for the current demonstration viewport.";
+      const explanationPrompt = "Explain the work you actually completed in this BuildLens request. Be specific and concise. Do not claim engineering safety or checks that were not run. For a reconstructed model, report the validated element counts, what was omitted or unverified, and cite source filenames/pages from the observations. For display commands, confirm the exact visibility/opacity action. Current model data: " + modelSummary +
+        "\nRecorded source observations: " + JSON.stringify(state.findings).slice(0, 18000) +
+        "\nRejected members: " + JSON.stringify(state.toolErrors).slice(0, 6000) +
+        "\nExecuted actions: " + JSON.stringify(state.actions.map(action => ({ type: action.type, category: action.category, visible: action.visible, opacity: action.opacity, elementIds: action.elementIds })));
       try {
-        const closing = await callMeta({
+        const explanation = await callMeta({
           apiKey,
-          messages: [...messages, {
-            role: "user",
-            content: "Stop calling tools. Give the user a concise, truthful status report. State explicitly whether the existing 3D model was updated. Explain the tool failures or unfinished step using this execution information: " + failureContext + ". Do not claim an update unless a successful model action completed."
-          }],
+          messages: [...messages, { role: "user", content: explanationPrompt }],
           useTools: false,
+          stream: true,
+          maxCompletionTokens: 2048,
+          onDelta: chunk => sendEvent("delta", { text: chunk }),
           timeoutMs: Math.max(1000, deadline - Date.now() - 500)
         });
-        finalAnswer = getText(closing?.choices?.[0]?.message?.content) || "";
-        completed = Boolean(finalAnswer.trim());
-      } catch (closingError) {
-        console.error("BuildLens final status generation failed:", closingError?.name || "Error");
+        finalAnswer = getText(explanation?.choices?.[0]?.message?.content) || "";
+      } catch (explanationError) {
+        console.error("BuildLens streamed explanation failed:", explanationError?.name || "Error");
       }
-      if (!completed) {
-        finalAnswer = state.toolErrors.length
-          ? "I could not complete the requested model update. The model-generation tools returned errors: " + state.toolErrors.map(item => item.tool + ": " + item.error).join("; ")
-          : "I could not complete the requested model update. No successful model update was confirmed.";
+      if (!finalAnswer.trim()) {
+        if (state.model) {
+          const counts = Object.fromEntries(Object.entries(state.model.structure || {}).map(([key, value]) => [key, Array.isArray(value) ? value.length : 0]));
+          const total = Object.values(counts).reduce((sum, value) => sum + value, 0);
+          finalAnswer = "The validated model was sent to the workspace renderer with " + total + " retained elements. " +
+            (state.findings.length ? state.findings.length + " source observations were recorded. " : "") +
+            "Values not supported by the supplied drawings remain unverified.";
+        } else finalAnswer = "The requested display control was applied to the workspace.";
       }
+      completed = true;
+    }
+
+    if (!completed && currentModel && !finalAnswer.trim()) {
+      finalAnswer = "I could not confirm completion of the requested model operation. The existing model remains unchanged unless a successful operation was reported.";
     }
 
     if (!finalAnswer.trim() && state.actions.length && (currentModel || state.model)) {
