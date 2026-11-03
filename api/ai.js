@@ -242,11 +242,14 @@ const tools = [
   }
 ];
 
-// Keep the remaining tool schemas shallow to avoid provider schema-depth errors.
-// Reconstruction uses direct top-level model/observations arguments; other tools
-// retain the shallow payload adapter until their individual schemas are migrated.
+// Preserve native structured arguments whenever the schema is within the provider's
+// nesting limit. Only unusually deep schemas use the JSON-string adapter.
+function schemaDepth(value) {
+  if (!value || typeof value !== "object") return 0;
+  return 1 + Math.max(0, ...Object.values(value).map(schemaDepth));
+}
 for (const tool of tools) {
-  if (["reconstruct_building", "record_drawing_observations", "set_model_visibility", "set_model_opacity", "inspect_model_element"].includes(tool.function.name)) continue;
+  if (schemaDepth(tool.function.parameters) <= 9) continue;
   const original = tool.function.parameters;
   tool.function.description += "\n\nPass one argument named payload: a JSON-encoded string containing the complete arguments object. Payload shape: " + JSON.stringify(original);
   tool.function.parameters = {
