@@ -82,6 +82,7 @@ const reinforcement = {
       },
     },
     notes: { type: "string" },
+    barMark: { type: "string" },
     provenance,
   },
 };
@@ -171,6 +172,22 @@ const structuralSchema = {
           pileCount: { type: "integer", minimum: 1 },
         },
       },
+    },
+    roofs: {
+      type: "array",
+      items: {
+        type: "object", additionalProperties: false,
+        required: ["id", "type", "outline", "eavesElevation", "provenance"],
+        properties: {
+          ...memberBase,
+          type: { type: "string", enum: ["flat", "gable", "hip", "shed"] },
+          outline: { type: "array", minItems: 3, items: point2 },
+          eavesElevation: signedMeasurement,
+          rise: dimension,
+          thickness: dimension,
+          ridgeAxis: { type: "string", enum: ["x", "z"] }
+        }
+      }
     },
   },
 };
@@ -312,7 +329,7 @@ export function validateBuildingModel(model) {
   if (!isObject(model.metadata) || !Array.isArray(model.metadata.createdFrom)) errors.push("metadata.createdFrom must be an array");
   if (!isObject(model.structure)) errors.push("structure must be an object");
   else {
-    for (const category of ["columns", "beams", "slabs", "walls", "stairs", "foundations"]) {
+    for (const category of ["columns", "beams", "slabs", "walls", "stairs", "foundations", "roofs"]) {
       const items = model.structure[category] ?? [];
       if (!Array.isArray(items)) {
         errors.push(`structure.${category} must be an array`);
@@ -387,8 +404,18 @@ export function validateBuildingModel(model) {
           if (item.start && item.end && Math.hypot(item.end.x-item.start.x,item.end.z-item.start.z)<=0) errors.push(`${path} must have a positive horizontal run`);
           if (item.start && item.end && item.end.y<=item.start.y) errors.push(`${path}.end must be above its start`);
         } else if (category === "foundations") {
-          checkPoint(item.center, ["x", "y", "z"], `${path}.center`, errors);
-          for (const key of ["width", "length", "depth"]) checkDimension(item[key], `${path}.${key}`, errors);
+          checkPoint(item.center, ["x", "y", "z"], path + ".center", errors);
+          for (const key of ["width", "length", "depth"]) checkDimension(item[key], path + "." + key, errors);
+        } else if (category === "roofs") {
+          if (!["flat", "gable", "hip", "shed"].includes(item.type)) errors.push(path + ".type must be flat, gable, hip, or shed");
+          if (!Array.isArray(item.outline) || item.outline.length < 3) errors.push(path + ".outline needs at least three plan points");
+          else item.outline.forEach((point, j) => checkPoint(point, ["x", "z"], path + ".outline[" + j + "]", errors));
+          checkSignedMeasurement(item.eavesElevation, path + ".eavesElevation", errors);
+          if (item.type !== "flat") {
+            checkDimension(item.rise, path + ".rise", errors);
+            if (!["x", "z"].includes(item.ridgeAxis)) errors.push(path + ".ridgeAxis must be x or z for a pitched roof");
+          }
+          if (item.thickness) checkDimension(item.thickness, path + ".thickness", errors);
         }
 
         if (item.reinforcement !== undefined) {
@@ -523,6 +550,6 @@ export function createEmptyBuildingModel({ id = "building-1", name = "Untitled b
       provenance: { status: "assumed", note: "Placeholder level so a new project has a valid starting structure." },
     }],
     grids: [],
-    structure: { columns: [], beams: [], slabs: [], walls: [], foundations: [] },
+    structure: { columns: [], beams: [], slabs: [], walls: [], stairs: [], foundations: [], roofs: [] },
   };
 }
