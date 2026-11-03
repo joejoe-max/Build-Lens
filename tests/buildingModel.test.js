@@ -132,6 +132,22 @@ test("renderer creates roof meshes and derives slab reinforcement from documente
     ridgeAxis: "x",
     provenance
   });
+  model.structure.beams.push({
+    id: "B-TEST",
+    start: { x: 0, y: 4, z: 0 },
+    end: { x: 4, y: 4, z: 0 },
+    width: { value: 0.3, provenance },
+    depth: { value: 0.5, provenance },
+    provenance,
+    reinforcement: [{
+      arrangement: "longitudinal",
+      barDiameter: { value: 0.016, provenance },
+      spacing: { value: 0.15, provenance },
+      cover: { value: 0.04, provenance },
+      barMark: "B1",
+      provenance
+    }]
+  });
   model.structure.slabs.push({
     id: "S-TEST",
     outline: [{ x: 0, z: 0 }, { x: 4, z: 0 }, { x: 4, z: 4 }, { x: 0, z: 4 }],
@@ -151,6 +167,7 @@ test("renderer creates roof meshes and derives slab reinforcement from documente
   const result = createBuildingModel(scene, model);
   assert.ok(result.elements.some(element => element.userData.category === "roofs" && element.userData.id === "R-TEST"));
   assert.ok(result.elements.filter(element => element.userData.category === "reinforcement").length > 0);
+  assert.ok(result.elements.some(element => element.userData.ownerId === "B-TEST" && element.userData.reinforcementType === "longitudinal"));
   scene.traverse(object => {
     object.geometry?.dispose?.();
     if (Array.isArray(object.material)) object.material.forEach(material => material.dispose());
