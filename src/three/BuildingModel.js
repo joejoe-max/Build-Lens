@@ -89,7 +89,7 @@ function addReinforcement(group, elements, item, scale, MATERIALS) {
   (item.reinforcement || []).forEach((layout, i) => (layout.bars || []).forEach((bar, j) =>
     addRod(group, elements, bar, scale, `${item.id}-rebar-${i}-${j}`, item, layout, i, MATERIALS)));
 }
-function addSlab(group, elements, slab, scale, levelElevation) {
+function addSlab(group, elements, slab, scale, levelElevation, MATERIALS) {
   const y = (slab.elevation?.value ?? levelElevation) * scale;
   const shape = new THREE.Shape();
   slab.outline.forEach((p, i) => i ? shape.lineTo(p.x * scale, p.z * scale) : shape.moveTo(p.x * scale, p.z * scale));
@@ -225,7 +225,7 @@ function createFromSpec(scene, model, MATERIALS) {
   }
   for (const slab of model.structure.slabs || []) {
     const elevation=slab.levelId && levels.has(slab.levelId) ? levels.get(slab.levelId) : (levels.values().next().value ?? 0);
-    addSlab(group,elements,slab,s,elevation);
+    addSlab(group,elements,slab,s,elevation,MATERIALS);
     addReinforcement(group,elements,slab,s,MATERIALS);
     (slab.reinforcement || []).forEach((layout, index) => addDerivedSlabReinforcement(group, elements, slab, layout, s, slab.elevation?.value ?? elevation, index, MATERIALS));
   }
