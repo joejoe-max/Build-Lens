@@ -105,10 +105,19 @@ test("flags columns offset from supplied grids and reinforcement without a bar m
       provenance
     }]
   });
+  model.structure.columns.push({
+    id: "C2",
+    base: { x: 0.52, y: 0, z: 0.52 },
+    top: { x: 0.52, y: 3, z: 0.52 },
+    width: { value: 0.3, provenance },
+    depth: { value: 0.3, provenance },
+    provenance
+  });
   assert.equal(validateBuildingModel(model).valid, true);
   const warnings = analyzeStructuralConnectivity(model).warnings;
   assert.ok(warnings.some(warning => warning.code === "off_grid_column" && warning.elementId === "C1"));
   assert.ok(warnings.some(warning => warning.code === "missing_bar_mark" && warning.elementId === "C1"));
+  assert.ok(warnings.some(warning => warning.code === "overlapping_columns" && warning.elementId === "C1"));
 });
 
 test("renderer creates roof meshes and derives slab reinforcement from documented layout", () => {
