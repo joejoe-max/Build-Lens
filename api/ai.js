@@ -47,13 +47,14 @@ const reconstructionTool = {
   type: "function",
   function: {
     name: "reconstruct_building",
-    description: "MANDATORY for every first-time 3D building reconstruction request: invoke this function instead of replying with a text-only promise. Reconstruct the uploaded building in one operation. Pass payload as a JSON-encoded string with shape {observations:[{sourceFile,sourcePage,category,property,value,unit,provenance,description,confidence?}],model:{schemaVersion,id,name,units,levels,grids,structure,metadata,...}}. Record source-page evidence and provide a complete model conforming to BuildLens schema 1.0.0. Use only drawing-supported dimensions. If details are absent, leave structural arrays empty and record missing_information observations; never invent geometry. The application validates the model and renders it in Three.js.",
+    description: "MANDATORY for every first-time 3D reconstruction. Return the complete canonical BuildLens model as a JSON-encoded string in model, and source observations as a JSON-encoded array in observations. The model MUST use schemaVersion 1.0.0, id, name, units (m/mm/cm/ft), levels with elevation {value,provenance:{status}}, grids, structure arrays (columns,beams,slabs,walls,stairs,foundations), and metadata.createdFrom. Every dimension MUST be {value:number,provenance:{status}}; coordinates are plain numeric x/y/z. Provenance status is specified, calculated, inferred, assumed, missing, or unverified. Do not invent geometry or dimensions. Include every supported member; partial valid geometry is better than discarding the whole model. Exact canonical schema: " + JSON.stringify(BUILDING_MODEL_SCHEMA),
     parameters: {
       type: "object",
       additionalProperties: false,
-      required: ["payload"],
+      required: ["model", "observations"],
       properties: {
-        payload: { type: "string", minLength: 2, maxLength: 900000, description: "JSON-encoded reconstruction payload containing observations and model." }
+        model: { type: "string", minLength: 2, maxLength: 900000, description: "JSON-encoded canonical model object conforming to the schema in the function description." },
+        observations: { type: "string", minLength: 2, maxLength: 250000, description: "JSON-encoded array of source observations. Use [] when none can be extracted." }
       }
     }
   }
@@ -222,10 +223,11 @@ const tools = [
   }
 ];
 
-// Meta's function schema validator rejects deeply nested parameter schemas.
-// Keep the provider-facing schema shallow for EVERY tool; the application
-// still validates each decoded payload before mutating project state.
+// Keep the remaining tool schemas shallow to avoid provider schema-depth errors.
+// Reconstruction uses direct top-level model/observations arguments; other tools
+// retain the shallow payload adapter until their individual schemas are migrated.
 for (const tool of tools) {
+  if (tool.function.name === "reconstruct_building") continue;
   const original = tool.function.parameters;
   tool.function.description += "\n\nPass one argument named payload: a JSON-encoded string containing the complete arguments object. Payload shape: " + JSON.stringify(original);
   tool.function.parameters = {
@@ -233,14 +235,61 @@ for (const tool of tools) {
     additionalProperties: false,
     required: ["payload"],
     properties: {
-      payload: {
-        type: "string",
-        minLength: 2,
-        maxLength: 900000,
-        description: "JSON-encoded string containing the function arguments described above."
-      }
+      payload: { type: "string", minLength: 2, maxLength: 900000, description: "JSON-encoded string containing the function arguments described above." }
     }
   };
+}
+
+function normalizeReconstructionModel(input) {
+  const model = JSON.parse(JSON.stringify(input));
+  const provenance = { status: "unverified", note: "Value supplied by the model without explicit provenance; verify against source drawings." };
+  const measurementKeys = new Set(["width", "depth", "height", "thickness", "length", "spacing", "cover", "barDiameter", "diameter", "elevation", "positionFromStart", "sillHeight"]);
+  const walk = value => {
+    if (!value || typeof value !== "object") return;
+    for (const [key, child] of Object.entries(value)) {
+      if (measurementKeys.has(key) && typeof child === "number" && Number.isFinite(child)) {
+        value[key] = { value: child, provenance: { ...provenance } };
+      } else if (measurementKeys.has(key) && child && typeof child === "object" && Number.isFinite(child.value) && !child.provenance) {
+        child.provenance = { ...provenance };
+      } else walk(child);
+    }
+  };
+  walk(model);
+  model.schemaVersion = model.schemaVersion || "1.0.0";
+  model.id = model.id || "reconstructed-building";
+  model.name = model.name || "Reconstructed building";
+  model.units = ["m", "mm", "cm", "ft"].includes(model.units) ? model.units : "m";
+  model.metadata = model.metadata && typeof model.metadata === "object" ? model.metadata : {};
+  model.metadata.createdFrom = Array.isArray(model.metadata.createdFrom) ? model.metadata.createdFrom : [];
+  model.levels = Array.isArray(model.levels) && model.levels.length ? model.levels : [{
+    id: "level-0", name: "Ground level",
+    elevation: { value: 0, provenance: { status: "assumed", note: "Placeholder datum; confirm from drawings." } },
+    provenance: { status: "assumed", note: "Placeholder level; confirm from drawings." }
+  }];
+  model.grids = Array.isArray(model.grids) ? model.grids : [];
+  model.structure = model.structure && typeof model.structure === "object" ? model.structure : {};
+  const categories = ["columns", "beams", "slabs", "walls", "stairs", "foundations"];
+  for (const category of categories) if (!Array.isArray(model.structure[category])) model.structure[category] = [];
+  for (const category of categories) {
+    const accepted = [];
+    const items = model.structure[category];
+    for (const item of items) {
+      const candidate = { ...model, structure: { ...model.structure, [category]: [item] } };
+      const result = validateBuildingModel(candidate);
+      const ownErrors = result.errors.filter(error => error.includes("structure." + category + "[0]"));
+      if (!ownErrors.length) accepted.push(item);
+    }
+    model.structure[category] = accepted;
+  }
+  const rejected = [];
+  // Preserve a clean member-by-member result while the complete model validator
+  // continues to enforce cross-references and project-level consistency.
+  for (const category of categories) {
+    const originalItems = Array.isArray(input.structure?.[category]) ? input.structure[category] : [];
+    const acceptedIds = new Set(model.structure[category].map(item => item.id));
+    for (const item of originalItems) if (!acceptedIds.has(item?.id)) rejected.push({ category, id: item?.id || null });
+  }
+  return { model, rejected };
 }
 
 function getText(value) {
@@ -263,22 +312,29 @@ function findElement(model, elementId) {
 
 function executeTool(name, args, state) {
   if (name === "reconstruct_building") {
-    if (typeof args?.payload !== "string") return { ok: false, error: "Reconstruction payload must be a JSON-encoded string." };
-    let payload;
-    try { payload = JSON.parse(args.payload); } catch { return { ok: false, error: "Reconstruction payload is not valid JSON." }; }
-    if (!payload || typeof payload !== "object" || Array.isArray(payload) || !payload.model || !Array.isArray(payload.observations)) {
-      return { ok: false, error: "Reconstruction payload must contain observations[] and model." };
+    if (typeof args?.model !== "string" || typeof args?.observations !== "string") {
+      return { ok: false, error: "Return model and observations as separate JSON-encoded string arguments." };
     }
-    const geometryCategories = ["columns", "beams", "slabs", "walls", "stairs", "foundations"];
-    const geometryCount = geometryCategories.reduce((sum, key) => sum + (Array.isArray(payload.model.structure?.[key]) ? payload.model.structure[key].length : 0), 0);
-    if (geometryCount === 0) return { ok: false, error: "No supported building geometry was reconstructed from the supplied evidence. Do not return an empty or invented model; identify the unreadable or missing drawing information and try again with clearer source pages." };
-    if (payload.observations.length) {
-      const evidence = executeTool("record_drawing_observations", { observations: payload.observations }, state);
+    let proposedModel, observations;
+    try { proposedModel = JSON.parse(args.model); } catch { return { ok: false, error: "The model JSON is invalid or truncated. Return the complete model JSON without prose or truncation." }; }
+    try { observations = JSON.parse(args.observations); } catch { return { ok: false, error: "The observations JSON is invalid. Return a JSON array, or []." }; }
+    if (!proposedModel || typeof proposedModel !== "object" || Array.isArray(proposedModel) || !Array.isArray(observations)) {
+      return { ok: false, error: "Return a model object and an observations array." };
+    }
+    const normalized = normalizeReconstructionModel(proposedModel);
+    const validation = validateBuildingModel(normalized.model);
+    if (!validation.valid) {
+      return { ok: false, error: "The reconstruction still has model-level validation errors after valid members were retained.", validationErrors: validation.errors.slice(0, 40), rejectedMembers: normalized.rejected };
+    }
+    if (observations.length) {
+      const evidence = executeTool("record_drawing_observations", { observations }, state);
       if (!evidence.ok) return evidence;
     }
-    const rendered = executeTool("render_building_model", { model: payload.model }, state);
+    const rendered = executeTool("render_building_model", { model: normalized.model }, state);
     if (!rendered.ok) return rendered;
-    return { ok: true, modelId: rendered.modelId, elementCounts: rendered.elementCounts, observationsRecorded: state.findings.length };
+    const geometryCount = Object.entries(normalized.model.structure).reduce((sum, [key, value]) =>
+      sum + (["columns", "beams", "slabs", "walls", "stairs", "foundations"].includes(key) && Array.isArray(value) ? value.length : 0), 0);
+    return { ok: true, modelId: rendered.modelId, elementCounts: rendered.elementCounts, observationsRecorded: state.findings.length, geometryCount, rejectedMembers: normalized.rejected, partial: normalized.rejected.length > 0 };
   }
   if (args && typeof args.payload === "string") {
     try { args = JSON.parse(args.payload); }
@@ -453,7 +509,7 @@ async function callMeta({ apiKey, messages, useTools = true, toolsToUse = tools,
         stream: false,
         messages,
         ...(useTools ? { tools: toolsToUse, tool_choice: "auto", parallel_tool_calls: false } : {}),
-        max_completion_tokens: 6144,
+        max_completion_tokens: 12288,
         reasoning_effort: "low"
       })
     });
@@ -577,7 +633,7 @@ export default async function handler(req, res) {
     const startedAt = Date.now();
     const deadline = startedAt + 285000;
     const requestTools = currentModel ? tools : [reconstructionTool];
-    const maxTurns = currentModel ? 3 : 1;
+    const maxTurns = currentModel ? 3 : 3;
 
     for (let turn = 0; turn < maxTurns; turn++) {
       const remainingMs = deadline - Date.now();
@@ -615,7 +671,12 @@ export default async function handler(req, res) {
           hasText: Boolean(plainText),
           usage: payload?.usage || null
         }));
-        sendEvent("error", { error: "Meta AI returned an explanation but did not invoke the building reconstruction function. No 3D model was generated." });
+        if (turn + 1 < maxTurns) {
+          messages.push({ role: "assistant", content: plainText || "I did not return a reconstruction tool call." });
+          messages.push({ role: "user", content: "You must call reconstruct_building now. Return direct model and observations arguments, not a payload wrapper. Follow the canonical schema supplied in the function description. If a member is uncertain, omit that member and explain the missing evidence in observations. Do not answer with prose alone." });
+          continue;
+        }
+        sendEvent("error", { error: "Meta AI did not invoke the reconstruction function after three bounded attempts. No project model was generated." });
         closeStream();
         return;
       }
@@ -660,10 +721,10 @@ export default async function handler(req, res) {
         const geometryCount = ["columns", "beams", "slabs", "walls", "stairs", "foundations"]
           .reduce((sum, key) => sum + (counts[key] || 0), 0);
         const detail = Object.entries(counts).filter(([, count]) => count).map(([category, count]) => count + " " + category).join(", ");
-        if (geometryCount > 0 && validateBuildingModel(state.model).valid) {
+        if (validateBuildingModel(state.model).valid) {
           finalAnswer = "Drawing interpretation and model validation completed. I recorded " + state.findings.length +
-            " source observations and created a 3D model containing " + geometryCount + " structural elements (" + detail +
-            "). The validated model data has been sent to the workspace renderer. Dimensions or reinforcement not supported by the uploaded pages remain unverified; this is a drawing reconstruction, not a structural safety certification.";
+            " source observations and retained " + geometryCount + " validated structural elements (" + detail +
+            "). Invalid individual members were omitted rather than discarding the entire reconstruction. The model data has been sent to the workspace renderer. Dimensions or reinforcement not supported by the uploaded pages remain unverified; this is a drawing reconstruction, not a structural safety certification.";
           completed = true;
           break;
         }
@@ -680,7 +741,7 @@ export default async function handler(req, res) {
       }));
       sendEvent("error", { error: errors
         ? "The drawing was received, but model validation failed: " + errors + ". No 3D model was generated."
-        : "The drawing was received, but BuildLens could not complete the reconstruction within the request. No 3D model was reported as generated." });
+        : "The drawing was received, but BuildLens could not complete the reconstruction within the request. No validated model was reported as generated." });
       closeStream();
       return;
     }
