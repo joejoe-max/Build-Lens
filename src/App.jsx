@@ -19,51 +19,113 @@ async function readAttachment(file) {
   const extension = file.name.split(".").pop().toLowerCase();
   if (file.type.startsWith("image/") && ["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
     const bitmap = await createImageBitmap(file);
-    const scale = Math.min(1, 1200 / Math.max(bitmap.width, bitmap.height));
+    const scale = Math.min(1, 1000 / Math.max(bitmap.width, bitmap.height));
     const canvas = document.createElement("canvas");
     canvas.width = Math.max(1, Math.round(bitmap.width * scale));
     canvas.height = Math.max(1, Math.round(bitmap.height * scale));
     canvas.getContext("2d").drawImage(bitmap, 0, 0, canvas.width, canvas.height);
     bitmap.close?.();
-    const dataUrl = canvas.toDataURL("image/jpeg", 0.68);
-    if (dataUrl.length > 850000) throw new Error(`${file.name} could not be compressed small enough. Try a smaller image.`);
+    let dataUrl = canvas.toDataURL("image/jpeg", 0.58);
+    if (dataUrl.length > 350000) dataUrl = canvas.toDataURL("image/jpeg", 0.42);
+    if (dataUrl.length > 350000) throw new Error(`${file.name} could not be compressed small enough. Try a smaller image.`);
     return { id: crypto.randomUUID(), name: file.name, type: "image/jpeg", kind: "image", dataUrl, status: "Image ready to analyse" };
   }
   if (extension === "pdf" || file.type === "application/pdf") {
     const pdf = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
-    const pages = [];
-    const pageImages = [];
-    const previewPages = new Set([1, Math.ceil(Math.min(pdf.numPages, 35) / 2), Math.min(pdf.numPages, 35)]);
-    for (let pageNumber = 1; pageNumber <= Math.min(pdf.numPages, 35); pageNumber++) {
+    const pageRecords = [];
+    const maxPages = Math.min(pdf.numPages, 100);
+    for (let pageNumber = 1; pageNumber <= maxPages; pageNumber++) {
       const page = await pdf.getPage(pageNumber);
       const content = await page.getTextContent();
-      const text = content.items.map(item => item.str || "").join(" ").replace(/\s+/g, " ").trim();
-      if (text) pages.push(`[Page ${pageNumber}]\n${text}`);
-      // Extract both selectable text and visual page previews so drawings,
-      // schedules and scanned pages remain available to the vision model.
-      if (previewPages.has(pageNumber)) {
-        const base = page.getViewport({ scale: 1 });
-        const viewport = page.getViewport({ scale: Math.min(1.25, 1100 / base.width) });
-        const canvas = document.createElement("canvas");
-        canvas.width = Math.max(1, Math.round(viewport.width));
-        canvas.height = Math.max(1, Math.round(viewport.height));
-        await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
-        const dataUrl = canvas.toDataURL("image/jpeg", 0.62);
-        if (dataUrl.length <= 850000) pageImages.push({ pageNumber, dataUrl });
-        canvas.width = 0; canvas.height = 0;
+      const positioned = content.items
+        .filter(item => typeof item.str === "string" && item.str.trim())
+        .map(item => ({ text: item.str.trim(), x: item.transform?.[4] || 0, y: item.transform?.[5] || 0, width: item.width || 0 }))
+        .sort((a, b) => Math.abs(b.y - a.y) > 2.5 ? b.y - a.y : a.x - b.x);
+      const rows = [];
+      for (const item of positioned) {
+        let row = rows.find(candidate => Math.abs(candidate.y - item.y) <= 2.5);
+        if (!row) { row = { y: item.y, items: [] }; rows.push(row); }
+        row.items.push(item);
       }
+      const pageText = rows
+        .sort((a, b) => b.y - a.y)
+        .map(row => {
+          row.items.sort((a, b) => a.x - b.x);
+          let line = "";
+          let previous = null;
+          for (const item of row.items) {
+            if (previous) {
+              const gap = item.x - (previous.x + previous.width);
+              line += gap > 34 ? "  |  " : " ";
+            }
+            line += item.text;
+            previous = item;
+          }
+          return line.trim();
+        })
+        .filter(Boolean)
+        .join("\n");
+      pageRecords.push({ pageNumber, text: pageText });
     }
-    const extracted = pages.join("\n\n");
+
+    // Choose page previews across the whole drawing set: first/last/middle,
+    // plus sheets whose extracted text suggests plans, sections or schedules.
+    const keywords = /architect|structur|foundation|footing|column|beam|slab|reinforc|rebar|schedule|section|elevation|stair|roof|layout|framing|general arrangement|bar mark/i;
+    const ranked = pageRecords.map(record => {
+      const hits = (record.text.match(new RegExp(keywords.source, "gi")) || []).length;
+      const spread = record.pageNumber === 1 || record.pageNumber === maxPages || record.pageNumber === Math.ceil(maxPages / 2);
+      return { ...record, score: hits * 3 + (spread ? 4 : 0) + (record.text.length > 100 ? 1 : 0) };
+    }).sort((a, b) => b.score - a.score || a.pageNumber - b.pageNumber);
+    const selectedPages = new Set(ranked.slice(0, Math.min(8, ranked.length)).map(record => record.pageNumber));
+    // Scanned sheets have no searchable text; include evenly spaced pages.
+    if (pageRecords.every(record => !record.text)) {
+      for (let i = 0; i < Math.min(8, maxPages); i++) selectedPages.add(Math.max(1, Math.min(maxPages, Math.round(1 + i * (maxPages - 1) / 7))));
+    }
+
+    const pageImages = [];
+    for (const pageNumber of [...selectedPages].sort((a, b) => a - b)) {
+      const page = await pdf.getPage(pageNumber);
+      const base = page.getViewport({ scale: 1 });
+      const viewport = page.getViewport({ scale: Math.min(1, 900 / base.width) });
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(viewport.width));
+      canvas.height = Math.max(1, Math.round(viewport.height));
+      await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
+      let dataUrl = canvas.toDataURL("image/jpeg", 0.46);
+      if (dataUrl.length > 260000) dataUrl = canvas.toDataURL("image/jpeg", 0.34);
+      if (dataUrl.length <= 260000) pageImages.push({ pageNumber, dataUrl });
+      canvas.width = 0; canvas.height = 0;
+    }
+    const extracted = pageRecords
+      .filter(record => record.text)
+      .map(record => "[Page " + record.pageNumber + "]\n" + record.text)
+      .join("\n\n");
     if (!extracted && !pageImages.length) throw new Error(`${file.name} could not be read. Try exporting it again as a standard PDF.`);
-    return { id: crypto.randomUUID(), name: file.name, type: "application/pdf", kind: "text", content: extracted.slice(0, 45000), pageImages, status: extracted ? `Text + representative page previews (${pageImages.map(page => page.pageNumber).join(", ")}) ready` : `Scanned PDF · representative pages ${pageImages.map(page => page.pageNumber).join(", ")} ready` };
+    return {
+      id: crypto.randomUUID(), name: file.name, type: "application/pdf", kind: "text",
+      content: extracted.slice(0, 120000), pageImages,
+      status: `Read ${maxPages} of ${pdf.numPages} pages · ${pageImages.length} visual sheets selected`
+    };
   }
   if (extension === "docx") {
-    const result = await mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() });
-    if (!result.value.trim()) throw new Error(`${file.name} contains no extractable text.`);
-    return { id: crypto.randomUUID(), name: file.name, type: file.type, kind: "text", content: result.value.slice(0, 45000), status: "Document text extracted" };
+    const buffer = await file.arrayBuffer();
+    const [result, htmlResult] = await Promise.all([
+      mammoth.extractRawText({ arrayBuffer: buffer }),
+      mammoth.convertToHtml({ arrayBuffer: buffer })
+    ]);
+    const parsed = new DOMParser().parseFromString(htmlResult.value, "text/html");
+    const tables = [...parsed.querySelectorAll("table")].map((table, index) => {
+      const rows = [...table.querySelectorAll("tr")].map(row =>
+        [...row.querySelectorAll("th,td")].map(cell => cell.textContent.trim()).join(" | ")
+      ).filter(Boolean);
+      return rows.length ? "[Table " + (index + 1) + "]\n" + rows.join("\n") : "";
+    }).filter(Boolean);
+    const content = [result.value.trim(), ...tables].filter(Boolean).join("\n\n");
+    if (!content.trim()) throw new Error(`${file.name} contains no extractable text.`);
+    return { id: crypto.randomUUID(), name: file.name, type: file.type, kind: "text", content: content.slice(0, 120000), status: `Document text + ${tables.length} table(s) extracted` };
   }
   if (textExtensions.includes(extension) || file.type.startsWith("text/")) {
-    return { id: crypto.randomUUID(), name: file.name, type: file.type || "text/plain", kind: "text", content: (await file.text()).slice(0, 45000), status: "Text ready to analyse" };
+    return { id: crypto.randomUUID(), name: file.name, type: file.type || "text/plain", kind: "text", content: (await file.text()).slice(0, 120000), status: "Text ready to analyse" };
   }
   throw new Error(`${file.name}: this format is not supported yet. Use PDF, DOCX, TXT, CSV, JSON, PNG, JPG or WEBP.`);
 }
@@ -228,19 +290,21 @@ export default function App() {
       // Keep the request comfortably below Vercel's function body limit.
       // Document text from every active project file is retained; only a
       // maximum of three compressed visual previews are sent per request.
-      let remainingVisualPreviews = 3;
+      let remainingVisualPreviews = 10;
+      const textFileCount = Math.max(1, attachmentSnapshot.filter(file => typeof file.content === "string").length);
+      const perDocumentTextBudget = Math.floor(480000 / textFileCount);
       const requestAttachments = attachmentSnapshot.map(({ name, type, kind, content, dataUrl, pageImages }) => {
         let visual = [];
-        if (kind === "image" && typeof dataUrl === "string" && remainingVisualPreviews > 0) {
+        if (remainingVisualPreviews > 0 && kind === "image" && typeof dataUrl === "string") {
           visual = [{ dataUrl }];
           remainingVisualPreviews -= 1;
-        } else if (Array.isArray(pageImages) && remainingVisualPreviews > 0) {
+        } else if (remainingVisualPreviews > 0 && Array.isArray(pageImages)) {
           visual = pageImages.slice(0, remainingVisualPreviews);
           remainingVisualPreviews -= visual.length;
         }
         return {
           name, type, kind,
-          ...(typeof content === "string" ? { content } : {}),
+          ...(typeof content === "string" ? { content: content.slice(0, perDocumentTextBudget) } : {}),
           ...(visual.length && kind === "image" ? { dataUrl: visual[0].dataUrl } : {}),
           ...(visual.length && kind !== "image" ? { pageImages: visual } : {})
         };
