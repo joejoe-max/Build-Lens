@@ -114,3 +114,6 @@
 .top-upload-dot{width:7px;height:7px;border-radius:50%;background:#d9bd83;box-shadow:0 0 0 3px #d9bd8322;animation:uploadPulse 1.2s ease-in-out infinite}
 @keyframes uploadPulse{50%{opacity:.35}}
 @media(max-width:760px){.top-upload-status{font-size:10px;padding:6px 7px}.top-upload-status{max-width:130px;overflow:hidden;text-overflow:ellipsis}}
+
+.upload-progress-track span.upload-processing{width:38%!important;animation:uploadSlide 1.35s ease-in-out infinite alternate}
+@keyframes uploadSlide{from{transform:translateX(-35%)}to{transform:translateX(170%)}}
