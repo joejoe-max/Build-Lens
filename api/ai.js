@@ -5,12 +5,12 @@ const SYSTEM_PROMPT = `You are BuildLens, an AI building reconstruction and engi
 Your primary job is to interpret the user's actual uploaded engineering documents and reconstruct the building they describe. Do not replace this with a generic sample building or a text-only description.
 DOCUMENT INTERPRETATION WORKFLOW:
 1. Inspect EVERY supplied project source on every request, including documents uploaded earlier in this workspace. The application resends the active project's saved document contents with each request; do not claim an earlier document is unavailable if it appears in the supplied attachment context. Use the filename and page number as source references. If the attachment context is genuinely absent or truncated, identify the missing filename rather than guessing.
-2. For a new project, use add_reconstruction_chunk. Send a small core JSON object first, then each structural category as a separate JSON-array string. Split large categories across multiple calls. Use [] for categories with no supported geometry. Finish with section=finalize. Never send the complete building as one giant JSON string. The server assembles the chunks and validates individual members. Separate specified, calculated, inferred and unverified values.
+2. For a new project, call reconstruct_building exactly once with the complete canonical model JSON string and a separate observations JSON array. Include all supported categories in that one model. Separate specified, calculated, inferred and unverified values. Do not split a normal reconstruction into sequential model calls.
 3. Cross-check plans against sections, elevations, schedules and calculations. Prefer dimension strings and schedules over estimating from visual scale. If dimensions conflict, record both and flag the conflict; do not silently choose one.
 4. Establish a coordinate convention and datum. Use x/z for plan coordinates and y for vertical elevations. Convert all values consistently into the model's declared units. State the coordinate origin and any orientation convention in model metadata/generalNotes.
 5. Build a complete coordinated building, not just a skeletal frame. Establish all floor levels and floor-to-floor heights first. Columns must be continuous vertical members from their documented base/support level to their documented top/support level; never model a full-storey column as a short stub at a beam joint. Their base.y and top.y must match the relevant level elevations and their x/z coordinates must match the column setting-out plan/grid. If a column schedule gives size, use it; do not shrink it to fit a symbol. Beams must span between the actual support centre-lines at the correct storey elevation, with section width/depth from schedules. Slabs must cover their actual floor plates and include openings. Read architectural plans/elevations as well as structural drawings: model the external envelope, every clearly dimensioned internal/partition wall, retaining walls, parapets and roof outline; do not leave walls empty merely because the structural framing sheets are more detailed. Walls should be continuous between the correct floor/roof levels and use documented thickness/height. Model doors and windows as explicit wall openings with kind=door or kind=window, opening width, height, position along wall and sill height. A window must have a nonzero sill; a door normally starts at floor level unless the drawing says otherwise. Model roof geometry, roof edges and stairs when supported by the drawings. Use member schedules to populate cross-sections. Use foundation plans/sections for below-ground geometry. Model stair flights only when plan/section dimensions, total rise, horizontal run, width and step count or riser/tread schedule are available; populate the stairs category with documented geometry. Preserve slab openings as polygon outlines and wall openings with position-from-start, width, height and sill height when stated. Where the drawing explicitly identifies grid references, store column.gridRefs.x and column.gridRefs.z using the matching grid IDs and ensure the coordinates agree with those grid positions. Where beam supports are identifiable, store startSupportId and endSupportId referencing actual column/beam IDs and make beam endpoint coordinates meet those support points. Where a foundation supports one or more columns, store supportedElementIds. Do not invent a support relationship simply because two objects appear visually close; use coordinate matches only as diagnostic candidates, not as confirmed design connections.
 6. Read reinforcement callouts carefully: bar diameter, count, spacing, layers/faces, anchorage and cover. Preserve each documented reinforcement layout on its owning beam, column, slab, stair or foundation using arrangement, barDiameter, quantity, spacing, cover, grade, notes and provenance. Only create individual bars with explicit start/end coordinates when their positions can be derived from documented geometry and arrangement. For closed stirrups/links, the renderer may derive loops only when the member cross-section, member axis, bar diameter, spacing and cover are all documented. For slab mesh layouts, the renderer may derive orthogonal top/bottom bars from the slab outline only when arrangement, bar diameter, spacing and cover are all documented; choose top, bottom, both_faces or mesh to match the drawing. Otherwise preserve metadata without drawing guessed bars. Preserve barMark identifiers wherever shown; explicitly record missing bar marks as missing_information observations tied to the affected member. Never invent bar placement, hooks, anchorage or lap lengths.
-7. For a new project, use add_reconstruction_chunk in this order: core, columns, beams, slabs, walls, stairs, foundations, roofs, then finalize. Send every section even when its array is empty. For an existing project, use update_building_model when revising the model. Never fill unknown dimensions with guesses.
+7. For a new project, use reconstruct_building once and include columns, beams, slabs, walls, stairs, foundations and roofs in the returned model, using empty arrays for unsupported categories. For an existing project, use update_building_model when revising the model. Never fill unknown dimensions with guesses.
 8. Cross-check architectural drawings against structural drawings for column positions, grid alignment, wall locations, openings, floor levels, slab edges and roof outlines. When values conflict, record an explicit conflict observation tied to the affected element ID and both source pages; never silently select one drawing. Flag columns offset from supplied grid lines for review. Record missing reinforcement bar marks as missing-information observations, preserving the affected member ID so the workspace can highlight it.\n9. Explain what was successfully reconstructed, what remains missing, any drawing conflicts and which source pages support key dimensions.
 INTERPRETATION RULES:
 - Distinguish specified, calculated, inferred, assumed, missing and unverified values. Use source page and calculation notes for every engineering value.
@@ -27,7 +27,7 @@ INTERPRETATION RULES:
 - Separate source-specified values from assumptions. State the assumed support condition, load path, tributary width, effective depth, material factors and design code whenever they materially affect a result. If any are unknown, identify the result as illustrative/preliminary.
 - For foundation recommendations, do not select a foundation type or size as "best" without geotechnical data, column actions, groundwater information, settlement assessment and applicable code checks. Give conditional options and list the missing evidence.
 MODEL AND TOOL BEHAVIOUR:
-Use add_reconstruction_chunk for a newly interpreted building. Use update_building_model when revising an existing model. Use set_model_visibility for display requests and inspect_model_element for element details. A successful model tool call updates project model data; the application handles Three.js rendering. Do not claim a viewport update unless confirmed.
+Use reconstruct_building for a newly interpreted building. Return one complete model and its source observations in that call. Use update_building_model when revising an existing model. Use set_model_visibility for display requests and inspect_model_element for element details. A successful model tool call updates project model data; the application handles Three.js rendering. Do not claim a viewport update unless confirmed.
 Keep the answer practical. Summarize extracted evidence, model contents, uncertainties and next required information.`;
 
 export const config = { maxDuration: 300 };
@@ -50,7 +50,7 @@ const reconstructionTool = {
   type: "function",
   function: {
     name: "reconstruct_building",
-    description: "MANDATORY for every first-time 3D reconstruction. Return the complete canonical BuildLens model as a JSON-encoded string in model, and source observations as a JSON-encoded array in observations. The model MUST use schemaVersion 1.0.0, id, name, units (m/mm/cm/ft), levels with elevation {value,provenance:{status}}, grids, structure arrays (columns,beams,slabs,walls,stairs,foundations,roofs), and metadata.createdFrom. Every dimension MUST be {value:number,provenance:{status}}; coordinates are plain numeric x/y/z. Provenance status is specified, calculated, inferred, assumed, missing, or unverified. Do not invent geometry or dimensions. Include every supported member; partial valid geometry is better than discarding the whole model. Exact canonical schema: " + JSON.stringify(BUILDING_MODEL_SCHEMA),
+    description: "MANDATORY for every first-time 3D reconstruction. Return one complete canonical BuildLens model as a JSON-encoded string in model, plus source observations as a separate JSON-encoded array in observations. Include every supported architectural and structural category. Every dimension must include provenance; coordinates use x/y/z. Do not invent geometry or dimensions. The canonical schema is supplied in the developer instructions.",
     parameters: {
       type: "object",
       additionalProperties: false,
@@ -60,18 +60,6 @@ const reconstructionTool = {
         observations: { type: "string", minLength: 2, maxLength: 250000, description: "JSON-encoded array of source observations. Use [] when none can be extracted." }
       }
     }
-  }
-};
-
-const reconstructionChunkTool = {
-  type: "function",
-  function: {
-    name: "add_reconstruction_chunk",
-    description: "Create a new building model in small calls. First section=core with JSON string data containing schemaVersion,id,name,units,levels,grids,metadata and optional observations. Then send each category columns,beams,slabs,walls,stairs,foundations,roofs as JSON string arrays. Split large arrays into multiple calls; each call appends. Finish with section=finalize and data='{}'. Do not send the whole model in one response.",
-    parameters: { type: "object", additionalProperties: false, required: ["section","data"], properties: {
-      section: { type: "string", enum: ["core","columns","beams","slabs","walls","stairs","foundations","roofs","finalize"] },
-      data: { type: "string", minLength: 2, maxLength: 900000 }
-    } }
   }
 };
 
@@ -615,82 +603,83 @@ function executeTool(name, args, state) {
   return { ok: false, error: "Unknown tool." };
 }
 
-async function callMeta({ apiKey, messages, useTools = true, toolsToUse = tools, timeoutMs = 45000, stream = false, onDelta = () => {}, maxCompletionTokens = 12288 }) {
+async function callMeta({ apiKey, messages, useTools = true, toolsToUse = tools, timeoutMs = 45000, stream = false, onDelta = () => {}, maxCompletionTokens = 4096 }) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), Math.max(1000, timeoutMs));
   try {
     const response = await fetch("https://api.meta.ai/v1/chat/completions", {
       method: "POST",
-      headers: {
-        Authorization: "Bearer " + apiKey,
-        "Content-Type": "application/json",
-        Accept: stream ? "text/event-stream" : "application/json"
-      },
+      headers: { Authorization: "Bearer " + apiKey, "Content-Type": "application/json", Accept: stream ? "text/event-stream" : "application/json" },
       signal: controller.signal,
       body: JSON.stringify({
-        model: "muse-spark-1.3",
-        stream,
-        messages,
-        ...(useTools ? { tools: toolsToUse, tool_choice: "auto", parallel_tool_calls: false } : {}),
-        max_completion_tokens: maxCompletionTokens,
-        reasoning_effort: "low"
+        model: "muse-spark-1.3", stream, messages,
+        ...(useTools && toolsToUse.length ? { tools: toolsToUse, tool_choice: "auto", parallel_tool_calls: false } : {}),
+        max_completion_tokens: maxCompletionTokens, reasoning_effort: "low"
       })
     });
     let payload;
     if (stream && response.ok) {
       if (!response.body) throw new Error("Meta AI opened a stream without a response body.");
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "", answer = "";
+      const reader = response.body.getReader(), decoder = new TextDecoder();
+      let buffer = "", answer = "", finishReason = null, usage = null;
+      const toolCalls = new Map();
       const consume = frame => {
         for (const line of frame.split(/\r?\n/)) {
           if (!line.startsWith("data:")) continue;
           const raw = line.slice(5).trim();
           if (!raw || raw === "[DONE]") continue;
-          try {
-            const event = JSON.parse(raw);
-            const delta = event.choices?.[0]?.delta?.content;
-            if (typeof delta === "string" && delta) { answer += delta; onDelta(delta); }
-          } catch { /* Ignore non-JSON keep-alive frames. */ }
+          let event; try { event = JSON.parse(raw); } catch { continue; }
+          if (event.usage) usage = event.usage;
+          const choice = event.choices?.[0]; if (!choice) continue;
+          if (choice.finish_reason) finishReason = choice.finish_reason;
+          const delta = choice.delta || {};
+          if (typeof delta.content === "string" && delta.content) { answer += delta.content; onDelta(delta.content); }
+          for (const fragment of delta.tool_calls || []) {
+            const index = Number.isInteger(fragment.index) ? fragment.index : 0;
+            const call = toolCalls.get(index) || { id: "", type: "function", function: { name: "", arguments: "" } };
+            if (fragment.id) call.id = fragment.id;
+            if (fragment.type) call.type = fragment.type;
+            if (fragment.function?.name) call.function.name += fragment.function.name;
+            if (fragment.function?.arguments) call.function.arguments += fragment.function.arguments;
+            toolCalls.set(index, call);
+          }
         }
       };
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const frames = buffer.split(/\r?\n\r?\n/);
-        buffer = frames.pop() || "";
-        frames.forEach(consume);
-      }
-      buffer += decoder.decode();
-      if (buffer.trim()) consume(buffer);
-      payload = { choices: [{ message: { content: answer }, finish_reason: "stop" }] };
+      try {
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const frames = buffer.split(/\r?\n\r?\n/); buffer = frames.pop() || "";
+          frames.forEach(consume);
+        }
+        buffer += decoder.decode(); if (buffer.trim()) consume(buffer);
+      } finally { reader.releaseLock?.(); }
+      payload = {
+        choices: [{
+          message: {
+            role: "assistant", content: answer || null,
+            ...(toolCalls.size ? { tool_calls: [...toolCalls.entries()].sort((a, b) => a[0] - b[0]).map(([, call]) => call) } : {})
+          },
+          finish_reason: finishReason || (toolCalls.size ? "tool_calls" : "stop")
+        }],
+        ...(usage ? { usage } : {})
+      };
     } else {
       const raw = await response.text();
-      try { payload = raw ? JSON.parse(raw) : null; }
-      catch { throw new Error("Meta AI returned an unreadable response."); }
+      try { payload = raw ? JSON.parse(raw) : null; } catch { throw new Error("Meta AI returned an unreadable response."); }
     }
-
     if (!response.ok) {
       const providerMessage = payload?.error?.message || payload?.message;
       console.error("Meta API request failed:", response.status, String(providerMessage || "").slice(0, 400));
-      const error = new Error(response.status === 401 || response.status === 403
-        ? "Meta API authentication failed. Check META_API_KEY in Vercel."
-        : "Meta AI request failed (HTTP " + response.status + "). " + (providerMessage || "Please try again."));
-      error.status = response.status >= 500 ? 502 : response.status;
-      throw error;
+      const error = new Error(response.status === 401 || response.status === 403 ? "Meta API authentication failed. Check META_API_KEY in Vercel." : "Meta AI request failed (HTTP " + response.status + "). " + (providerMessage || "Please try again."));
+      error.status = response.status >= 500 ? 502 : response.status; throw error;
     }
     return payload;
   } catch (error) {
-    if (error?.name === "AbortError") {
-      const timeout = new Error("Meta AI took too long to interpret the drawings. The request was stopped before Vercel's execution limit; no model was reported as complete.");
-      timeout.status = 504;
-      throw timeout;
-    }
+    if (error?.name === "AbortError") { const timeout = new Error("Meta AI took too long to interpret the drawings. The request was stopped before Vercel's execution limit; no model was reported as complete."); timeout.status = 504; throw timeout; }
     throw error;
-  } finally {
-    clearTimeout(timer);
-  }
+  } finally { clearTimeout(timer); }
 }
 
 export default async function handler(req, res) {
@@ -752,10 +741,14 @@ export default async function handler(req, res) {
   const modelContext = currentModel
     ? "\n\nCurrent validated project model (preserve its existing verified data unless instructed otherwise):\n" + JSON.stringify(currentModel).slice(0, 50000)
     : "\n\nNo building model has been generated for this project yet.";
+  const wantsReconstruction = /\b(?:generate|create|build|reconstruct|render|produce|make|fix|correct|redesign)\b[\s\S]{0,70}\b(?:3d|model|building|structure|house)\b|\b3d\s+(?:model|reconstruction|building|render)\b|\bmodel\s+(?:this|these|the|from|of)\b/i.test(message);
+  const wantsModelOperation = /\b(?:show|hide|isolate|inspect|measure|update|change|modify|revise|resize|fix|correct|reinforce|reinforcement|rebar|opacity|transparent|visible|visibility|display|add|remove|delete)\b/i.test(message);
+  const chatInstructions = "You are BuildLens, an engineering document assistant. Answer the user's actual question using supplied project evidence. Never invent dimensions, reinforcement, loads, material strengths or code checks. Distinguish documented facts from assumptions and uncertainty. Do not certify structural safety. Be concise and explain what source evidence is missing when relevant.";
+  const developerInstructions = wantsReconstruction || (currentModel && wantsModelOperation)
+    ? SYSTEM_PROMPT + "\n\nCANONICAL BUILDING MODEL JSON SCHEMA (follow exactly; do not use bare numeric dimensions):\n" + JSON.stringify(BUILDING_MODEL_SCHEMA) + modelContext
+    : chatInstructions + (currentModel ? "\n\nThe project has a validated 3D model available in the workspace. Do not claim to change it unless a model tool action succeeds." : "");
   const messages = [
-    { role: "developer", content: SYSTEM_PROMPT +
-      "\n\nCANONICAL BUILDING MODEL JSON SCHEMA (follow exactly; do not use bare numeric dimensions):\n" +
-      JSON.stringify(BUILDING_MODEL_SCHEMA) + modelContext },
+    { role: "developer", content: developerInstructions },
     ...history.map(({ role, content }) => ({ role, content: content.slice(0, 12000) })),
     { role: "user", content: imageParts.length ? [{ type: "text", text: message + attachmentText }, ...imageParts] : message + attachmentText }
   ];
@@ -794,11 +787,11 @@ export default async function handler(req, res) {
     let completed = false;
     const startedAt = Date.now();
     const deadline = startedAt + 285000;
-    const requestTools = currentModel ? tools : [
-      reconstructionChunkTool,
-      ...tools.filter(tool => ["set_model_visibility", "set_model_opacity"].includes(tool.function.name))
-    ];
-    const maxTurns = currentModel ? 3 : 16;
+    // Normal chat does not need a tool round trip. A first reconstruction
+    // uses one complete-model tool call instead of eight sequential chunks.
+    const requestTools = wantsReconstruction && !currentModel ? [reconstructionTool]
+      : currentModel && (wantsModelOperation || wantsReconstruction) ? tools : [];
+    const maxTurns = wantsReconstruction && !currentModel ? 2 : 1;
 
     for (let turn = 0; turn < maxTurns; turn++) {
       const remainingMs = deadline - Date.now();
@@ -806,13 +799,15 @@ export default async function handler(req, res) {
       sendEvent('status', { message: currentModel ? 'Interpreting your instruction and preparing the model update.' : 'Interpreting drawings and preparing the building reconstruction.' });
       const requestStartedAt = Date.now();
       payload = await callMeta({
-        apiKey,
-        messages,
-        toolsToUse: requestTools,
+        apiKey, messages, useTools: requestTools.length > 0, toolsToUse: requestTools,
+        stream: true, onDelta: chunk => sendEvent("delta", { text: chunk }),
+        maxCompletionTokens: wantsReconstruction ? 12288 : 4096,
         timeoutMs: remainingMs - 500
       });
       const choice = payload?.choices?.[0];
       const assistantMessage = choice?.message || {};
+      const assistantText = getText(assistantMessage.content);
+      if (assistantText.trim()) modelResponseText = assistantText;
       const toolCalls = Array.isArray(assistantMessage.tool_calls) ? assistantMessage.tool_calls : [];
       console.info("BuildLens AI completion", {
         turn: turn + 1,
@@ -825,9 +820,9 @@ export default async function handler(req, res) {
 
       if (choice?.finish_reason !== "tool_calls" && toolCalls.length === 0) {
         const plainText = getText(assistantMessage.content) || getText(assistantMessage.refusal) || getText(choice?.text);
-        if (currentModel) {
+        if (currentModel || !wantsReconstruction) {
           modelResponseText = plainText;
-          finalAnswer = "";
+          finalAnswer = plainText;
           completed = Boolean(plainText.trim());
           break;
         }
@@ -839,12 +834,10 @@ export default async function handler(req, res) {
         }));
         if (turn + 1 < maxTurns) {
           messages.push({ role: "assistant", content: plainText || "I did not return a reconstruction chunk." });
-          messages.push({ role: "user", content: state.reconstructionDraft
-            ? "Continue the chunked reconstruction. Send the next missing category using add_reconstruction_chunk. Split large categories into smaller JSON arrays. Finalize only after all seven categories have been supplied."
-            : "Start chunked reconstruction. Send section=core first, then columns, beams, slabs, walls, stairs, foundations and roofs as separate JSON-array calls. Use [] for empty categories. Split large categories into multiple calls. Finally call section=finalize. Do not return the entire building in one call." });
+          messages.push({ role: "user", content: "Retry the reconstruction as one complete call to reconstruct_building. Return the canonical model JSON string and a separate observations JSON array. Include all supported architectural walls, openings, slabs, roof geometry, stairs and structural members. Do not use chunked reconstruction." });
           continue;
         }
-        sendEvent("error", { error: "Meta AI did not invoke the reconstruction function after three bounded attempts. No project model was generated." });
+        sendEvent("error", { error: "Meta AI did not invoke the reconstruction function after two bounded attempts. No project model was generated." });
         closeStream();
         return;
       }
@@ -926,38 +919,25 @@ export default async function handler(req, res) {
       return;
     }
 
-    if ((hasSuccessfulWorkspaceAction || modelResponseText) && !finalAnswer.trim()) {
-      const modelSummary = state.model ? JSON.stringify({
-        name: state.model.name,
-        units: state.model.units,
-        structure: state.model.structure
-      }).slice(0, 42000) : "No validated model exists yet; the user has issued display controls for the current demonstration viewport.";
-      const explanationPrompt = "Explain the work you actually completed in this BuildLens request. Be specific and concise. Do not claim engineering safety or checks that were not run. For a reconstructed model, report the validated element counts, what was omitted or unverified, and cite source filenames/pages from the observations. For display commands, confirm the exact visibility/opacity action. Improve this prior draft if present, without inventing details: " + modelResponseText + "\nCurrent model data: " + modelSummary +
-        "\nRecorded source observations: " + JSON.stringify(state.findings).slice(0, 18000) +
-        "\nRejected members: " + JSON.stringify(state.toolErrors).slice(0, 6000) +
-        "\nExecuted actions: " + JSON.stringify(state.actions.map(action => ({ type: action.type, category: action.category, visible: action.visible, opacity: action.opacity, elementIds: action.elementIds })));
-      try {
-        const explanation = await callMeta({
-          apiKey,
-          messages: [...messages, { role: "user", content: explanationPrompt }],
-          useTools: false,
-          stream: true,
-          maxCompletionTokens: 2048,
-          onDelta: chunk => sendEvent("delta", { text: chunk }),
-          timeoutMs: Math.max(1000, deadline - Date.now() - 500)
-        });
-        finalAnswer = getText(explanation?.choices?.[0]?.message?.content) || "";
-      } catch (explanationError) {
-        console.error("BuildLens streamed explanation failed:", explanationError?.name || "Error");
+    if (hasSuccessfulWorkspaceAction || modelResponseText) {
+      if (!finalAnswer.trim() && state.model) {
+        const counts = Object.fromEntries(Object.entries(state.model.structure || {}).map(([key, value]) => [key, Array.isArray(value) ? value.length : 0]));
+        const total = Object.values(counts).reduce((sum, value) => sum + value, 0);
+        const detail = Object.entries(counts).filter(([, count]) => count).map(([category, count]) => count + " " + category).join(", ");
+        const rejected = state.toolErrors.length;
+        finalAnswer = (currentModel ? "The project model update was applied." : "The building model was generated and passed data validation.") +
+          " Retained " + total + " structural elements" + (detail ? " (" + detail + ")" : "") + "." +
+          (state.findings.length ? " Recorded " + state.findings.length + " source observations." : "") +
+          (rejected ? " Some unsupported or invalid members were omitted for review." : "") +
+          " Values not established by the supplied drawings remain unverified.";
       }
+      if (!finalAnswer.trim() && modelResponseText.trim()) finalAnswer = modelResponseText.trim();
       if (!finalAnswer.trim()) {
-        if (state.model) {
-          const counts = Object.fromEntries(Object.entries(state.model.structure || {}).map(([key, value]) => [key, Array.isArray(value) ? value.length : 0]));
-          const total = Object.values(counts).reduce((sum, value) => sum + value, 0);
-          finalAnswer = "The validated model was sent to the workspace renderer with " + total + " retained elements. " +
-            (state.findings.length ? state.findings.length + " source observations were recorded. " : "") +
-            "Values not supported by the supplied drawings remain unverified.";
-        } else finalAnswer = "The requested display control was applied to the workspace.";
+        const actions = state.actions.map(action => action.type === "model.visibility"
+          ? (action.visible ? "Showed " : "Hid ") + action.category
+          : action.type === "model.opacity" ? "Changed " + action.category + " opacity"
+          : action.type).join("; ");
+        finalAnswer = actions ? "Applied the requested workspace change: " + actions + "." : "The requested model operation was completed.";
       }
       completed = true;
     }
