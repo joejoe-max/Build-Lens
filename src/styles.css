@@ -109,3 +109,8 @@
 .upload-progress-track span{display:block;height:100%;border-radius:9px;background:#d5bd91;transition:width .22s ease}
 .upload-progress-track span.upload-failed{background:#d66b65}
 .upload-retry{border:1px solid #5a4a35;border-radius:5px;padding:5px 8px;background:#27231e;color:#e7c99b;font-size:10px;cursor:pointer}
+
+.top-upload-status{display:inline-flex;align-items:center;gap:8px;margin-left:auto;padding:7px 10px;border:1px solid #554936;border-radius:7px;background:#211f1a;color:#e3c99b;font-size:11px;white-space:nowrap;cursor:pointer}
+.top-upload-dot{width:7px;height:7px;border-radius:50%;background:#d9bd83;box-shadow:0 0 0 3px #d9bd8322;animation:uploadPulse 1.2s ease-in-out infinite}
+@keyframes uploadPulse{50%{opacity:.35}}
+@media(max-width:760px){.top-upload-status{font-size:10px;padding:6px 7px}.top-upload-status{max-width:130px;overflow:hidden;text-overflow:ellipsis}}
