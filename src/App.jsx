@@ -347,7 +347,6 @@ export default function App() {
   const [focusedFinding, setFocusedFinding] = useState(null);
   const messagesRef = useRef([]);
   const [messages, setMessages] = useState([]);
-  const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [busyLabel, setBusyLabel] = useState("BuildLens is responding…");
   const [mobilePanel, setMobilePanel] = useState(false);
@@ -436,14 +435,13 @@ export default function App() {
     messagesRef.current = [];
     setMessages([]);
     setHasStartedChat(true);
-    setInput("");
     setPendingAttachments([]);
     setNotice("");
   };
 
-  const sendMessage = async event => {
+  const sendMessage = async (event, draftText = "") => {
     event?.preventDefault();
-    const message = input.trim();
+    const message = String(draftText || "").trim();
     if ((!message && !pendingAttachments.length) || busy) return;
     if (!attachmentsHydrated) { setNotice("Project documents are still loading. Please wait a moment and send again."); return; }
     if (projectAttachments.length > 12) { setNotice("BuildLens can analyse up to 12 project documents per request. Remove or split the extra files first."); return; }
@@ -597,7 +595,7 @@ export default function App() {
       <EngineeringPanel
         open={mobilePanel} onClose={() => setMobilePanel(false)}
         files={files} onAddFiles={addFiles} onRemoveFile={removeFile}
-        messages={messages} busy={busy} busyLabel={busyLabel} input={input} onInputChange={setInput}
+        messages={messages} busy={busy} busyLabel={busyLabel} modelSpec={modelSpec}
         onSend={sendMessage} onClear={clearWorkspace} onExport={exportWorkspace}
         onNewChat={startNewChat} fileInputRef={fileInputRef} pendingAttachments={pendingAttachments}
       />
