@@ -11,8 +11,10 @@ const Conversation = React.memo(function Conversation({ messages, busy, busyLabe
 export default function EngineeringPanel({open,onClose,files,onRemoveFile,messages,busy,busyLabel,input,onSend,onClear,onNewChat,fileInputRef,pendingAttachments=[],modelSpec=null,uploadQueue=[],onRetryUpload=()=>{}}) {
  const [draft,setDraft] = useState(input || "");
  const submit = event => { event.preventDefault(); onSend(event,draft); setDraft(""); };
+ const newChat = () => { setDraft(""); onNewChat(); };
+ const clearWorkspace = () => { setDraft(""); onClear(); };
  return <aside className={open ? "right-panel mobile-open" : "right-panel"}>
-  <div className="panel-heading"><div className="panel-heading-icon"><Sparkles size={16}/></div><div className="panel-heading-title"><h2>Engineering assistant</h2></div><button className="new-chat-button" onClick={onNewChat} disabled={busy}><Plus size={14}/><span>New chat</span></button><button className="icon-button close-mobile" onClick={onClose} aria-label="Close assistant"><X size={18}/></button></div>
+  <div className="panel-heading"><div className="panel-heading-icon"><Sparkles size={16}/></div><div className="panel-heading-title"><h2>Engineering assistant</h2></div><button className="new-chat-button" onClick={newChat} disabled={busy}><Plus size={14}/><span>New chat</span></button><button className="icon-button close-mobile" onClick={onClose} aria-label="Close assistant"><X size={18}/></button></div>
   <div className="assistant-scope"><ShieldAlert size={15}/><span>Engineering guidance is preliminary. Verify design decisions before construction.</span></div>
   <div className="documents-block"><div className="block-title"><span>PROJECT FILES</span><span className="count">{files.length}</span></div><div className="file-list">{files.length ? files.map(file=><div className="file-row" key={file.id}><div className="file-type">{file.kind.slice(0,4)}</div><div className="file-info"><strong title={file.name}>{file.name}</strong><small>{file.status}</small></div><button className="icon-button remove-file" onClick={()=>onRemoveFile(file.id)} aria-label={"Remove " + file.name}><X size={14}/></button></div>) : <p className="empty-files">No project files yet.</p>}</div></div>
   {uploadQueue.filter(job=>job.status!=="ready").map(job=><div className="upload-progress-row" key={job.id}><div className="upload-progress-copy"><strong title={job.name}>{job.name}</strong><small>{job.status==="error" ? job.error || "Upload failed" : job.status==="queued" ? "Waiting to process…" : "Reading and preparing file…"}</small></div><div className="upload-progress-track"><span className={job.status==="error"?"upload-failed":job.status==="processing"?"upload-processing":""} style={{width:job.progress+"%"}}/></div>{job.status==="error"&&<button type="button" className="upload-retry" onClick={()=>onRetryUpload(job.id)}>Retry</button>}</div>)}
@@ -26,6 +28,6 @@ export default function EngineeringPanel({open,onClose,files,onRemoveFile,messag
    </div>
    <div className="composer-footer"><span>Enter to send · Shift + Enter for new line</span></div>
   </form>
-  <div className="panel-footer"><span><Check size={13}/> {busy?"Generating response…":"Ready to help"}</span><button onClick={onClear} disabled={busy}>Clear workspace</button></div>
+  <div className="panel-footer"><span><Check size={13}/> {busy?"Generating response…":"Ready to help"}</span><button onClick={clearWorkspace} disabled={busy}>Clear workspace</button></div>
  </aside>;
 }
