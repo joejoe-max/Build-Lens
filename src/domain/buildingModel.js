@@ -131,7 +131,7 @@ const structuralSchema = {
           ...memberBase,
           outline: { type: "array", minItems: 3, items: point2 },
           openings: { type: "array", items: { type: "object", additionalProperties: false, required: ["id", "outline"], properties: { id: { type: "string", minLength: 1 }, outline: { type: "array", minItems: 3, items: point2 } } } },
-          elevation: dimension,
+          elevation: signedMeasurement,
           thickness: dimension,
         },
       },
