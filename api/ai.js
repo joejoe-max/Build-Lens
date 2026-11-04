@@ -618,7 +618,8 @@ async function callMeta({ apiKey, messages, useTools = true, toolsToUse = tools,
       })
     });
     let payload;
-    if (stream && response.ok) {
+    const upstreamType = (response.headers.get("content-type") || "").toLowerCase();
+    if (stream && response.ok && upstreamType.includes("text/event-stream")) {
       if (!response.body) throw new Error("Meta AI opened a stream without a response body.");
       const reader = response.body.getReader(), decoder = new TextDecoder();
       let buffer = "", answer = "", finishReason = null, usage = null;
@@ -666,8 +667,12 @@ async function callMeta({ apiKey, messages, useTools = true, toolsToUse = tools,
         ...(usage ? { usage } : {})
       };
     } else {
+      // The provider may return JSON even when streaming was requested.
+      // Parse based on the actual response content type; never decode JSON
+      // as SSE and silently discard the assistant's answer.
       const raw = await response.text();
-      try { payload = raw ? JSON.parse(raw) : null; } catch { throw new Error("Meta AI returned an unreadable response."); }
+      try { payload = raw ? JSON.parse(raw) : null; }
+      catch { throw new Error("Meta AI returned neither a valid SSE stream nor readable JSON (content-type: " + (upstreamType || "missing") + ")."); }
     }
     if (!response.ok) {
       const providerMessage = payload?.error?.message || payload?.message;
@@ -757,6 +762,7 @@ export default async function handler(req, res) {
   // Meta itself remains non-streaming in this first safe iteration.
   res.statusCode = 200;
   res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+  res.setHeader("X-BuildLens-Protocol", "sse-v1");
   res.setHeader("Cache-Control", "no-cache, no-transform");
   res.setHeader("Connection", "keep-alive");
   res.setHeader("X-Accel-Buffering", "no");
