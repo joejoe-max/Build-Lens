@@ -1,8 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
 import { ChevronDown, FileUp, Layers3, MessageSquare, Plus, X, ArrowRight } from "lucide-react";
-import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
-import pdfjsWorker from "pdfjs-dist/legacy/build/pdf.worker.min.mjs?url";
-import mammoth from "mammoth";
 import Viewport from "./components/Viewport.jsx";
 import ModelControls, { ModelViewTabs } from "./components/ModelControls.jsx";
 import EngineeringPanel from "./components/EngineeringPanel.jsx";
@@ -10,7 +7,17 @@ import AssumptionPanel from "./components/AssumptionPanel.jsx";
 import { askBuildLens } from "./services/ai.js";
 import { validateBuildingModel } from "./domain/buildingModel.js";
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
+let pdfJsPromise;
+async function getPdfJs() {
+  if (!pdfJsPromise) pdfJsPromise = Promise.all([
+    import("pdfjs-dist/legacy/build/pdf.mjs"),
+    import("pdfjs-dist/legacy/build/pdf.worker.min.mjs?url")
+  ]).then(([pdf, worker]) => {
+    pdf.GlobalWorkerOptions.workerSrc = worker.default;
+    return pdf;
+  });
+  return pdfJsPromise;
+}
 
 const MAX_FILE_SIZE = 25 * 1024 * 1024;
 const EMPTY_MODEL_ACTIONS = Object.freeze([]);
@@ -206,6 +213,7 @@ async function readAttachment(file) {
   if (["dwg", "dxf"].includes(extension)) return readCadAttachment(file, extension);
   if (["xls", "xlsx", "ods"].includes(extension)) return readSpreadsheetAttachment(file);
   if (extension === "pdf" || file.type === "application/pdf") {
+    const pdfjsLib = await getPdfJs();
     const pdf = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
     const pageRecords = [];
     const maxPages = Math.min(pdf.numPages, 100);
@@ -284,6 +292,8 @@ async function readAttachment(file) {
   }
   if (extension === "docx") {
     const buffer = await file.arrayBuffer();
+    const mammothModule = await import("mammoth");
+    const mammoth = mammothModule.default || mammothModule;
     const [result, htmlResult] = await Promise.all([
       mammoth.extractRawText({ arrayBuffer: buffer }),
       mammoth.convertToHtml({ arrayBuffer: buffer })
