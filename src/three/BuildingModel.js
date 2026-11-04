@@ -335,10 +335,10 @@ function createFromSpec(scene, model, MATERIALS) {
       };
       const offsetFromStart = (opening.start + opening.end) / 2;
       const sill = opening.bottom, head = opening.top;
-      addFramePart(`${w.id}-opening-${index}-left`,frameWidth,openingHeight,opening.start,sill+openingHeight/2);
-      addFramePart(`${w.id}-opening-${index}-right`,frameWidth,openingHeight,opening.end-frameWidth,sill+openingHeight/2);
-      addFramePart(`${w.id}-opening-${index}-head`,width,frameWidth,opening.start,head-frameWidth/2);
-      if (sill > 0.08 * s) addFramePart(`${w.id}-opening-${index}-sill`,width,frameWidth,opening.start,sill-frameWidth/2);
+      addFramePart(`${w.id}-opening-${index}-left`,frameWidth,openingHeight,opening.start+frameWidth/2,sill+openingHeight/2);
+      addFramePart(`${w.id}-opening-${index}-right`,frameWidth,openingHeight,opening.end-frameWidth/2,sill+openingHeight/2);
+      addFramePart(`${w.id}-opening-${index}-head`,width,frameWidth,offsetFromStart,head-frameWidth/2);
+      if (sill > 0.08 * s) addFramePart(`${w.id}-opening-${index}-sill`,width,frameWidth,offsetFromStart,sill-frameWidth/2);
       if (opening.kind === "window") {
         const glass = new THREE.Mesh(new THREE.BoxGeometry(Math.max(0.01*s,width-2*frameWidth), Math.max(0.01*s,openingHeight-2*frameWidth), Math.max(0.008*s,frameDepth*0.18)), MATERIALS.glazing);
         glass.position.copy(center);
