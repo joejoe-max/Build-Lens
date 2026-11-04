@@ -125,3 +125,16 @@
 .top-upload-status>span:nth-child(2){display:grid;gap:4px;text-align:left}
 .top-upload-track{display:block;width:100%;height:3px;border-radius:8px;background:#4a4438;overflow:hidden}
 .top-upload-track i{display:block;width:42%;height:100%;border-radius:8px;background:#e0c38e;animation:uploadSlide 1.35s ease-in-out infinite alternate}
+
+/* Touch-first interior navigation controls. */
+.walk-direction-pad{display:flex;align-items:center;gap:7px;padding:5px 0;touch-action:none}
+.walk-direction-pad>span{font:9px var(--mono);color:#aeb9c0;margin-right:4px}
+.walk-direction-button{width:40px;height:40px;min-width:40px;display:grid;place-items:center;font-size:16px;touch-action:none;user-select:none;-webkit-user-select:none}
+.walk-direction-button:active{background:#53636d!important;color:#fff!important}
+@media(max-width:760px){
+ .walk-direction-pad{display:grid;grid-template-columns:repeat(4,minmax(40px,1fr));gap:6px}
+ .walk-direction-pad>span{grid-column:1/-1}
+ .walk-direction-button{width:100%;height:44px;min-width:0;font-size:18px}
+ .viewport-canvas{touch-action:pan-x pan-y}
+ .viewport-canvas canvas{touch-action:none}
+}
