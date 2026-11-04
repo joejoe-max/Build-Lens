@@ -13,6 +13,7 @@ import { validateBuildingModel } from "./domain/buildingModel.js";
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
 const MAX_FILE_SIZE = 25 * 1024 * 1024;
+const EMPTY_MODEL_ACTIONS = Object.freeze([]);
 const textExtensions = ["txt", "md", "csv", "json", "xml"];
 
 let dwgConverterPromise = null;
@@ -604,7 +605,7 @@ export default function App() {
           <ModelControls showGrid={showGrid} onToggleGrid={() => setShowGrid(value => !value)} onReset={() => document.querySelector(".viewport-canvas")?.dispatchEvent(new CustomEvent("buildlens-reset"))} />
         </div>
         <div className="viewport-wrap">
-          <Viewport view={view} showGrid={showGrid} modelSpec={modelSpec} modelActions={[]} findings={drawingFindings} focusElementId={focusedFinding?.id} focusRequest={focusedFinding?.request} />
+          <Viewport view={view} showGrid={showGrid} modelSpec={modelSpec} modelActions={EMPTY_MODEL_ACTIONS} findings={drawingFindings} focusElementId={focusedFinding?.id} focusRequest={focusedFinding?.request} />
           <div className="viewport-badge"><span className="live-dot" /> {modelSpec ? "PROJECT MODEL DATA RECEIVED" : "CONCEPT MODEL"} <span className="badge-divider">/</span> {modelSpec ? "VALIDATED" : "DEMO DATA"}</div>
           <div className="viewport-instructions"><span>DRAG TO ORBIT</span><i /><span>RIGHT-DRAG / TWO-FINGER DRAG TO PAN</span><i /><span>SCROLL / PINCH TO ZOOM</span></div>
           <div className="orientation-cube" aria-label="View orientation"><span className="cube-top">Y</span><span className="cube-front">Z</span><span className="cube-side">X</span></div>
