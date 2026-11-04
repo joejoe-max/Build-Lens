@@ -226,3 +226,55 @@ test("flags suspiciously short columns against floor-to-floor levels", () => {
   assert.ok(warning);
   assert.equal(warning.elementId, "C-STUB");
 });
+
+
+test("walls remain vertical along their plan direction when endpoint elevations differ", () => {
+  const model = createEmptyBuildingModel();
+  const provenance = { status: "specified" };
+  model.structure.walls.push({
+    id: "W-SLOPE",
+    start: { x: 0, y: 0, z: 0 },
+    end: { x: 4, y: 1, z: 0 },
+    height: { value: 3, provenance },
+    thickness: { value: 0.2, provenance },
+    provenance
+  });
+  const scene = new THREE.Scene();
+  const result = createBuildingModel(scene, model);
+  const wall = result.elements.find(element => element.userData.category === "walls");
+  assert.ok(wall);
+  const bounds = new THREE.Box3().setFromObject(result.building);
+  assert.ok(Math.abs(bounds.min.y) < 1e-5, "wall base should follow the supplied 0 m to 1 m baseline");
+  assert.ok(Math.abs(bounds.max.y - 4) < 1e-5, "wall top should remain 3 m above the sloped baseline");
+  assert.ok(Math.abs((bounds.max.y - bounds.min.y) - 4) < 1e-5);
+  scene.traverse(object => {
+    object.geometry?.dispose?.();
+    if (Array.isArray(object.material)) object.material.forEach(material => material.dispose());
+    else object.material?.dispose?.();
+  });
+});
+
+test("stair steps use one riser each instead of overlapping full-height blocks", () => {
+  const model = createEmptyBuildingModel();
+  const provenance = { status: "specified" };
+  model.structure.stairs.push({
+    id: "ST-TEST",
+    start: { x: 0, y: 0, z: 0 },
+    end: { x: 0, y: 3, z: 4 },
+    width: { value: 1, provenance },
+    thickness: { value: 0.2, provenance },
+    steps: 3,
+    provenance
+  });
+  const scene = new THREE.Scene();
+  const result = createBuildingModel(scene, model);
+  const steps = result.elements.filter(element => element.userData.category === "stairs");
+  assert.equal(steps.length, 3);
+  assert.deepEqual(steps.map(step => Number(step.geometry.parameters.height.toFixed(5))), [1, 1, 1]);
+  assert.deepEqual(steps.map(step => Number(step.position.y.toFixed(5))), [0.5, 1.5, 2.5]);
+  scene.traverse(object => {
+    object.geometry?.dispose?.();
+    if (Array.isArray(object.material)) object.material.forEach(material => material.dispose());
+    else object.material?.dispose?.();
+  });
+});
