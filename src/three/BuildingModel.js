@@ -303,7 +303,7 @@ function createFromSpec(scene, model, MATERIALS) {
   for (const w of model.structure.walls || []) {
     const a=vec(w.start,s), b=vec(w.end,s), d=b.clone().sub(a), length=d.length(); if(!length) continue;
     const h=w.height.value*s, thickness=w.thickness.value*s, direction=d.clone().normalize();
-    const openings=(w.openings||[]).map(o=>({start:o.positionFromStart.value*s,end:(o.positionFromStart.value+o.width.value)*s,bottom:(o.sillHeight?.value||0)*s,top:((o.sillHeight?.value||0)+o.height.value)*s})).sort((x,y)=>x.start-y.start);
+    const openings=(w.openings||[]).map(o=>({id:o.id,kind:o.kind||"opening",start:o.positionFromStart.value*s,end:(o.positionFromStart.value+o.width.value)*s,bottom:(o.sillHeight?.value||0)*s,top:((o.sillHeight?.value||0)+o.height.value)*s})).sort((x,y)=>x.start-y.start);
     const boundaries=[0,length,...openings.flatMap(o=>[o.start,o.end])].filter(v=>v>=0&&v<=length).sort((x,y)=>x-y).filter((v,i,a)=>i===0||Math.abs(v-a[i-1])>1e-6);
     const addWallPart=(id,from,to,bottom,top)=>{
       if(to-from<=1e-5||top-bottom<=1e-5)return;
