@@ -350,6 +350,57 @@ function findElement(model, elementId) {
 }
 
 function executeTool(name, args, state) {
+  if (name === "add_reconstruction_chunk") {
+    const categories = ["columns", "beams", "slabs", "walls", "stairs", "foundations", "roofs"];
+    if (!args || typeof args.section !== "string" || typeof args.data !== "string") {
+      return { ok: false, error: "A chunk requires section and JSON-string data." };
+    }
+    let data;
+    try { data = JSON.parse(args.data); }
+    catch { return { ok: false, error: "This section is truncated or invalid JSON. Retry it as smaller chunks." }; }
+    if (args.section === "core") {
+      if (state.reconstructionDraft) return { ok: false, error: "Core already received. Continue with the remaining categories." };
+      if (!data || typeof data !== "object" || Array.isArray(data)) return { ok: false, error: "Core must be a JSON object." };
+      state.reconstructionDraft = {
+        schemaVersion: data.schemaVersion || "1.0.0",
+        id: data.id || "reconstructed-building",
+        name: data.name || "Reconstructed building",
+        units: data.units || "m",
+        levels: data.levels,
+        grids: data.grids || [],
+        structure: Object.fromEntries(categories.map(category => [category, []])),
+        metadata: data.metadata || { createdFrom: [] },
+        ...(data.overallDimensions ? { overallDimensions: data.overallDimensions } : {})
+      };
+      state.reconstructionObservations = Array.isArray(data.observations) ? data.observations : [];
+      state.reconstructionSections = new Set(["core"]);
+      return { ok: true, section: "core", next: "columns" };
+    }
+    if (!state.reconstructionDraft) return { ok: false, error: "Send core before member categories." };
+    if (categories.includes(args.section)) {
+      if (!Array.isArray(data)) return { ok: false, error: args.section + " must be a JSON array." };
+      const existing = state.reconstructionDraft.structure[args.section];
+      const ids = new Set(existing.map(item => item?.id).filter(Boolean));
+      const accepted = data.filter(item => {
+        if (!item || typeof item !== "object" || !item.id || ids.has(item.id)) return false;
+        ids.add(item.id); return true;
+      });
+      state.reconstructionDraft.structure[args.section] = existing.concat(accepted);
+      state.reconstructionSections.add(args.section);
+      return { ok: true, section: args.section, accepted: accepted.length, total: state.reconstructionDraft.structure[args.section].length };
+    }
+    if (args.section === "finalize") {
+      const missing = categories.filter(category => !state.reconstructionSections.has(category));
+      if (missing.length) return { ok: false, error: "Send remaining categories first: " + missing.join(", ") + ". Use [] when none are present." };
+      const result = executeTool("reconstruct_building", {
+        model: JSON.stringify(state.reconstructionDraft),
+        observations: JSON.stringify(state.reconstructionObservations || [])
+      }, state);
+      if (result.ok) state.reconstructionDraft = null;
+      return result;
+    }
+    return { ok: false, error: "Unknown reconstruction section." };
+  }
   if (name === "reconstruct_building") {
     if (typeof args?.model !== "string" || typeof args?.observations !== "string") {
       return { ok: false, error: "Return model and observations as separate JSON-encoded string arguments." };
@@ -695,7 +746,7 @@ export default async function handler(req, res) {
     if (!validation.valid) return res.status(400).json({ error: "The current project model is invalid.", details: validation.errors.slice(0, 20) });
   }
 
-  const state = { model: currentModel, actions: [], findings: [], toolErrors: [] };
+  const state = { model: currentModel, actions: [], findings: [], toolErrors: [], reconstructionDraft: null, reconstructionObservations: [], reconstructionSections: null };
   const modelContext = currentModel
     ? "\n\nCurrent validated project model (preserve its existing verified data unless instructed otherwise):\n" + JSON.stringify(currentModel).slice(0, 50000)
     : "\n\nNo building model has been generated for this project yet.";
@@ -742,10 +793,10 @@ export default async function handler(req, res) {
     const startedAt = Date.now();
     const deadline = startedAt + 285000;
     const requestTools = currentModel ? tools : [
-      reconstructionTool,
+      reconstructionChunkTool,
       ...tools.filter(tool => ["set_model_visibility", "set_model_opacity"].includes(tool.function.name))
     ];
-    const maxTurns = currentModel ? 3 : 3;
+    const maxTurns = currentModel ? 3 : 16;
 
     for (let turn = 0; turn < maxTurns; turn++) {
       const remainingMs = deadline - Date.now();
@@ -785,8 +836,10 @@ export default async function handler(req, res) {
           usage: payload?.usage || null
         }));
         if (turn + 1 < maxTurns) {
-          messages.push({ role: "assistant", content: plainText || "I did not return a reconstruction tool call." });
-          messages.push({ role: "user", content: "You must call reconstruct_building now. Return direct model and observations arguments, not a payload wrapper. Follow the canonical schema supplied in the function description. If a member is uncertain, omit that member and explain the missing evidence in observations. Do not answer with prose alone." });
+          messages.push({ role: "assistant", content: plainText || "I did not return a reconstruction chunk." });
+          messages.push({ role: "user", content: state.reconstructionDraft
+            ? "Continue the chunked reconstruction. Send the next missing category using add_reconstruction_chunk. Split large categories into smaller JSON arrays. Finalize only after all seven categories have been supplied."
+            : "Start chunked reconstruction. Send section=core first, then columns, beams, slabs, walls, stairs, foundations and roofs as separate JSON-array calls. Use [] for empty categories. Split large categories into multiple calls. Finally call section=finalize. Do not return the entire building in one call." });
           continue;
         }
         sendEvent("error", { error: "Meta AI did not invoke the reconstruction function after three bounded attempts. No project model was generated." });
@@ -824,6 +877,13 @@ export default async function handler(req, res) {
           state.toolErrors = state.toolErrors.slice(-12);
         }
         messages.push({ role: "tool", tool_call_id: call.id, content: JSON.stringify(result) });
+        if (call.function?.name === "add_reconstruction_chunk" && result?.ok && result.section !== "finalize") {
+          const required = ["core", "columns", "beams", "slabs", "walls", "stairs", "foundations", "roofs"];
+          const missing = required.filter(section => !state.reconstructionSections?.has(section));
+          messages.push({ role: "user", content: missing.length
+            ? "Continue now with section " + missing[0] + ". Send it as a JSON string. If it contains many members, split it into multiple smaller calls. Do not skip any section; use [] only if no supported members exist."
+            : "All seven categories are received. Call add_reconstruction_chunk with section=finalize and data='{}'." });
+        }
       }
 
       if (state.actions.length) sendEvent('model', { actions: state.actions, model: state.model, findings: state.findings });
