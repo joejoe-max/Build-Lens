@@ -24,6 +24,7 @@ function Viewport({ view, showGrid = true, modelSpec = null, modelActions = [], 
   const measureModeRef = useRef(false);
   const measurePointsRef = useRef([]);
   const [measureMode, setMeasureMode] = useState(false);
+  const [walkMode, setWalkMode] = useState(false);
   const [measurement, setMeasurement] = useState(null);
   const [toolsOpen, setToolsOpen] = useState(() => !compact && typeof window !== "undefined" && window.matchMedia("(min-width: 761px)").matches);
   const [frameOpacity, setFrameOpacity] = useState(1);
@@ -276,14 +277,69 @@ function Viewport({ view, showGrid = true, modelSpec = null, modelActions = [], 
       setInspectionNotice("Selected finding: " + data.id);
     };
     const onSelection = event => setSelectedElement(event.detail || null);
-    const enterModel = () => {
-      if (!modelGroup) return;
-      const bounds = new THREE.Box3().setFromObject(modelGroup); if (bounds.isEmpty()) return;
-      const center = bounds.getCenter(new THREE.Vector3()); const size = bounds.getSize(new THREE.Vector3());
-      const span = Math.max(size.x, size.y, size.z, 1); controls.target.copy(center);
-      camera.position.set(center.x + span * 0.12, center.y + span * 0.08, center.z + span * 0.12);
-      controls.minDistance = Math.max(0.05, span * 0.002); controls.update();
+    let walking = false;
+    const walkKeys = new Set();
+    let lastWalkPointer = null;
+    let lastFrameTime = 0;
+    const stopWalking = () => {
+      walking = false; walkKeys.clear(); lastWalkPointer = null;
+      controls.enabled = true;
+      if (document.pointerLockElement === renderer.domElement) document.exitPointerLock?.();
+      controls.target.copy(camera.position).add(camera.getWorldDirection(new THREE.Vector3()).multiplyScalar(3));
+      controls.update(); setWalkMode(false);
     };
+    const startWalking = () => {
+      if (!modelGroup) return;
+      const bounds = new THREE.Box3().setFromObject(modelGroup);
+      if (bounds.isEmpty()) return;
+      const center = bounds.getCenter(new THREE.Vector3());
+      const unitScale = ({ m: 1, mm: 0.001, cm: 0.01, ft: 0.3048 })[modelSpecRef.current?.units] || 1;
+      const groundLevel = modelSpecRef.current?.levels?.[0]?.elevation?.value;
+      const eyeY = Number.isFinite(groundLevel) ? groundLevel * unitScale + 1.6 : bounds.min.y + 1.6;
+      camera.position.set(center.x, Math.min(eyeY, bounds.max.y - 0.2), center.z);
+      camera.rotation.order = "YXZ"; camera.rotation.set(0, 0, 0);
+      controls.target.copy(camera.position).add(new THREE.Vector3(0, 0, -3));
+      controls.enabled = false; controls.update();
+      walking = true; setWalkMode(true);
+      if (renderer.domElement.requestPointerLock && !("ontouchstart" in window)) {
+        renderer.domElement.requestPointerLock();
+      } else setInspectionNotice("Walk mode: drag the model to look around and use the direction pad to move.");
+    };
+    const toggleWalkMode = () => walking ? stopWalking() : startWalking();
+    const onWalkKeyDown = event => {
+      if (!walking || /^(INPUT|TEXTAREA|SELECT)$/.test(event.target?.tagName || "")) return;
+      const key = event.key.toLowerCase();
+      if (["w","a","s","d","arrowup","arrowdown","arrowleft","arrowright"].includes(key)) {
+        event.preventDefault(); walkKeys.add(key);
+      }
+      if (key === "escape") stopWalking();
+    };
+    const onWalkKeyUp = event => walkKeys.delete(event.key.toLowerCase());
+    const onWalkMouseMove = event => {
+      if (!walking || document.pointerLockElement !== renderer.domElement) return;
+      camera.rotation.y -= event.movementX * 0.0022;
+      camera.rotation.x = Math.max(-1.25, Math.min(1.25, camera.rotation.x - event.movementY * 0.0022));
+    };
+    const onWalkPointerDown = event => {
+      if (walking && event.pointerType === "touch") lastWalkPointer = { id: event.pointerId, x: event.clientX, y: event.clientY };
+    };
+    const onWalkPointerMove = event => {
+      if (!walking || !lastWalkPointer || lastWalkPointer.id !== event.pointerId) return;
+      const dx = event.clientX - lastWalkPointer.x, dy = event.clientY - lastWalkPointer.y;
+      camera.rotation.y -= dx * 0.004;
+      camera.rotation.x = Math.max(-1.2, Math.min(1.2, camera.rotation.x - dy * 0.004));
+      lastWalkPointer = { id: event.pointerId, x: event.clientX, y: event.clientY };
+    };
+    const onWalkPointerUp = event => { if (lastWalkPointer?.id === event.pointerId) lastWalkPointer = null; };
+    const onPointerLockChange = () => { if (walking && !document.pointerLockElement && !("ontouchstart" in window)) stopWalking(); };
+    document.addEventListener("keydown", onWalkKeyDown);
+    document.addEventListener("keyup", onWalkKeyUp);
+    document.addEventListener("mousemove", onWalkMouseMove);
+    document.addEventListener("pointerlockchange", onPointerLockChange);
+    renderer.domElement.addEventListener("pointerdown", onWalkPointerDown);
+    renderer.domElement.addEventListener("pointermove", onWalkPointerMove);
+    renderer.domElement.addEventListener("pointerup", onWalkPointerUp);
+    renderer.domElement.addEventListener("pointercancel", onWalkPointerUp);
     const rebuild = () => {
       if (modelGroup) disposeGroup(modelGroup);
       const created = createBuildingModel(scene, modelSpecRef.current);
@@ -341,7 +397,7 @@ function Viewport({ view, showGrid = true, modelSpec = null, modelActions = [], 
     host.addEventListener("buildlens-focus-element", onFocusElement);
     renderer.domElement.addEventListener("click", onSelect);
     host.__resetBuildLensCamera = resetCamera;
-    host.__enterBuildLensModel = enterModel;
+    host.__toggleBuildLensWalk = toggleWalkMode;
     host.__clearBuildLensMeasurements = clearMeasurements;
 
     const resize = () => {
@@ -354,6 +410,19 @@ function Viewport({ view, showGrid = true, modelSpec = null, modelActions = [], 
     const render = () => {
       if (!active || !inViewport || document.hidden) return;
       frame = requestAnimationFrame(render);
+      const now = performance.now();
+      const delta = lastFrameTime ? Math.min((now - lastFrameTime) / 1000, 0.05) : 0;
+      lastFrameTime = now;
+      if (walking && delta > 0) {
+        const forward = camera.getWorldDirection(new THREE.Vector3()); forward.y = 0; forward.normalize();
+        const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0,1,0)).normalize();
+        const movement = new THREE.Vector3();
+        if (walkKeys.has("w") || walkKeys.has("arrowup")) movement.add(forward);
+        if (walkKeys.has("s") || walkKeys.has("arrowdown")) movement.sub(forward);
+        if (walkKeys.has("d") || walkKeys.has("arrowright")) movement.add(right);
+        if (walkKeys.has("a") || walkKeys.has("arrowleft")) movement.sub(right);
+        if (movement.lengthSq()) camera.position.addScaledVector(movement.normalize(), delta * 2.2);
+      }
       controls.update(); applyVisibility(); updateCutaway(); renderer.render(scene, camera);
     };
     const intersectionObserver = new IntersectionObserver(entries => {
@@ -372,6 +441,11 @@ function Viewport({ view, showGrid = true, modelSpec = null, modelActions = [], 
     sceneState.current = { rebuild };
     return () => {
       active = false; cancelAnimationFrame(frame); resizeObserver.disconnect(); intersectionObserver.disconnect(); document.removeEventListener("visibilitychange", onDocumentVisibility);
+      document.removeEventListener("keydown", onWalkKeyDown); document.removeEventListener("keyup", onWalkKeyUp);
+      document.removeEventListener("mousemove", onWalkMouseMove); document.removeEventListener("pointerlockchange", onPointerLockChange);
+      renderer.domElement.removeEventListener("pointerdown", onWalkPointerDown); renderer.domElement.removeEventListener("pointermove", onWalkPointerMove);
+      renderer.domElement.removeEventListener("pointerup", onWalkPointerUp); renderer.domElement.removeEventListener("pointercancel", onWalkPointerUp);
+      if (document.pointerLockElement === renderer.domElement) document.exitPointerLock?.();
       host.removeEventListener("buildlens-reset", onReset);
       host.removeEventListener("buildlens-model-change", onModelChange);
       host.removeEventListener("buildlens-cutaway-change", onCutawayChange);
@@ -379,7 +453,7 @@ function Viewport({ view, showGrid = true, modelSpec = null, modelActions = [], 
       host.removeEventListener("buildlens-focus-element", onFocusElement);
       renderer.domElement.removeEventListener("click", onSelect);
       delete host.__resetBuildLensCamera;
-      delete host.__enterBuildLensModel;
+      delete host.__toggleBuildLensWalk;
       delete host.__clearBuildLensMeasurements;
       sceneState.current = null; controls.dispose(); disposeGroup(modelGroup);
       clearMeasurements(); scene.remove(measurementGroup);
@@ -431,7 +505,7 @@ function Viewport({ view, showGrid = true, modelSpec = null, modelActions = [], 
         <select aria-label="Cutaway axis" value={cutaway.axis} onChange={event => setCutaway(current => ({ ...current, axis: event.target.value }))}><option value="y">Horizontal</option><option value="x">Vertical X</option><option value="z">Vertical Z</option></select>
         <button type="button" className="inspection-button" onClick={() => { setCutaway({ enabled: false, axis: "y", position: 0.5 }); setHiddenIds([]); }}>Reset</button>
         <button type="button" className="inspection-button" onClick={() => hostRef.current?.__resetBuildLensCamera?.()}>Fit</button>
-        <button type="button" className="inspection-button" onClick={() => hostRef.current?.__enterBuildLensModel?.()}>Enter model</button>
+        <button type="button" className={walkMode ? "inspection-button active" : "inspection-button"} onClick={() => hostRef.current?.__toggleBuildLensWalk?.()}>{walkMode ? "Exit walk" : "Walk inside"}</button>
       </div>
       <div className="inspection-row measurement-status"><span>{inspectionNotice || (measurement?.waitingForSecondPoint ? "First point selected — choose the second point." : measurement?.label ? "Measured distance: " + measurement.label : measureMode ? "Tap two points on the model to measure." : "Measurements use the model declared units.")}</span></div>
       <div className="inspection-row inspection-slider-row"><span>Section position</span><input aria-label="Cutaway section position" type="range" min="0" max="100" value={Math.round(cutaway.position * 100)} onChange={event => setCutaway(current => ({ ...current, position: Number(event.target.value) / 100 }))} disabled={!cutaway.enabled}/></div>
