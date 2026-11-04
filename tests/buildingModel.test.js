@@ -163,11 +163,33 @@ test("renderer creates roof meshes and derives slab reinforcement from documente
       provenance
     }]
   });
+  model.structure.walls.push({
+    id: "W-TEST",
+    start: { x: 0, y: 0, z: 0 },
+    end: { x: 8, y: 0, z: 0 },
+    height: { value: 3, provenance },
+    thickness: { value: 0.2, provenance },
+    provenance,
+    openings: [{
+      id: "WIN-1", kind: "window",
+      positionFromStart: { value: 2, provenance },
+      width: { value: 1.5, provenance },
+      height: { value: 1.2, provenance },
+      sillHeight: { value: 0.9, provenance }
+    }, {
+      id: "DOOR-1", kind: "door",
+      positionFromStart: { value: 5, provenance },
+      width: { value: 0.9, provenance },
+      height: { value: 2.1, provenance }
+    }]
+  });
   const scene = new THREE.Scene();
   const result = createBuildingModel(scene, model);
   assert.ok(result.elements.some(element => element.userData.category === "roofs" && element.userData.id === "R-TEST"));
   assert.ok(result.elements.filter(element => element.userData.category === "reinforcement").length > 0);
   assert.ok(result.elements.some(element => element.userData.ownerId === "B-TEST" && element.userData.reinforcementType === "longitudinal"));
+  assert.ok(result.elements.some(element => element.userData.openingKind === "window" && element.userData.name === "Window glazing"));
+  assert.ok(result.elements.some(element => element.userData.openingKind === "door" && element.userData.name === "Door leaf"));
   scene.traverse(object => {
     object.geometry?.dispose?.();
     if (Array.isArray(object.material)) object.material.forEach(material => material.dispose());
@@ -192,4 +214,15 @@ test("does not flag matching architectural and structural dimensions", () => {
     { sourceFile: "S201.pdf", sourcePage: 2, discipline: "structural", category: "column", elementId: "C2", property: "width", value: 0.3, unit: "m" }
   ];
   assert.equal(detectDrawingConflicts(observations).length, 0);
+});
+
+
+test("flags suspiciously short columns against floor-to-floor levels", () => {
+  const model = createEmptyBuildingModel();
+  const provenance = { status: "specified" };
+  model.levels.push({ id: "level-1", name: "First floor", elevation: { value: 3.2, provenance }, provenance });
+  model.structure.columns.push({ id: "C-STUB", base: { x: 0, y: 0, z: 0 }, top: { x: 0, y: 0.25, z: 0 }, width: { value: 0.3, provenance }, depth: { value: 0.3, provenance }, provenance });
+  const warning = analyzeStructuralConnectivity(model).warnings.find(item => item.code === "suspicious_short_column");
+  assert.ok(warning);
+  assert.equal(warning.elementId, "C-STUB");
 });
