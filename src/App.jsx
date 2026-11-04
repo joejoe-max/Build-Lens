@@ -340,6 +340,7 @@ export default function App() {
   const [view, setView] = useState("building");
   const [files, setFiles] = useState([]);
   const [pendingAttachments, setPendingAttachments] = useState([]);
+  const [uploadQueue, setUploadQueue] = useState([]);
   const [projectAttachments, setProjectAttachments] = useState([]);
   const [attachmentsHydrated, setAttachmentsHydrated] = useState(false);
   const [modelSpec, setModelSpec] = useState(null);
@@ -401,27 +402,46 @@ export default function App() {
     } catch { setNotice("Workspace storage is full. Remove some files or export the workspace."); }
   }, [messages, files, projectName, modelSpec, drawingFindings]);
 
+  const processUpload = async (file, jobId) => {
+    setUploadQueue(current => current.map(job => job.id === jobId ? { ...job, status: "processing", progress: 12, error: "" } : job));
+    try {
+      const attachment = await readAttachment(file);
+      attachment.id = jobId;
+      setUploadQueue(current => current.map(job => job.id === jobId ? { ...job, progress: 88, status: "processing" } : job));
+      setFiles(current => [...current.filter(item => item.id !== jobId), {
+        id: attachment.id, name: attachment.name,
+        kind: attachment.name.split(".").pop().toUpperCase(),
+        type: attachment.type, status: attachment.status
+      }]);
+      setPendingAttachments(current => [...current.filter(item => item.id !== jobId), attachment]);
+      setProjectAttachments(current => [...current.filter(item => item.id !== jobId), attachment]);
+      setUploadQueue(current => current.map(job => job.id === jobId ? { ...job, status: "ready", progress: 100, error: "" } : job));
+      return true;
+    } catch (error) {
+      setUploadQueue(current => current.map(job => job.id === jobId ? { ...job, status: "error", progress: 100, error: error.message } : job));
+      return false;
+    }
+  };
+
   const addFiles = async event => {
     const selected = Array.from(event.target.files || []);
     event.target.value = "";
     if (!selected.length) return;
-    const next = [];
-    const failures = [];
-    for (const file of selected) {
-      if (file.size > MAX_FILE_SIZE) { failures.push(`${file.name}: exceeds 25 MB`); continue; }
-      try {
-        const attachment = await readAttachment(file);
-        next.push(attachment);
-      } catch (error) { failures.push(error.message); }
-    }
-    if (next.length) {
-      setFiles(current => [...current, ...next.map(({ id, name, type, status }) => ({ id, name, kind: name.split(".").pop().toUpperCase(), type, status }))]);
-      setPendingAttachments(current => [...current, ...next]);
-      setProjectAttachments(current => [...current, ...next]);
-      setNotice(`${next.length} file(s) ready. Add a question and send them to the assistant.`);
-    }
-    if (failures.length) setNotice(failures.slice(0, 3).join(" · "));
+    const jobs = selected.map(file => ({ id: crypto.randomUUID(), name: file.name, file, status: "queued", progress: 4, error: "" }));
+    setUploadQueue(current => [...current, ...jobs]);
     setMobilePanel(true);
+    for (const job of jobs) {
+      if (job.file.size > MAX_FILE_SIZE) {
+        setUploadQueue(current => current.map(item => item.id === job.id ? { ...item, status: "error", progress: 100, error: "File exceeds 25 MB." } : item));
+        continue;
+      }
+      await processUpload(job.file, job.id);
+    }
+  };
+
+  const retryUpload = async jobId => {
+    const job = uploadQueue.find(item => item.id === jobId);
+    if (job?.file) await processUpload(job.file, job.id);
   };
 
   const removeFile = id => {
@@ -597,7 +617,7 @@ export default function App() {
         files={files} onAddFiles={addFiles} onRemoveFile={removeFile}
         messages={messages} busy={busy} busyLabel={busyLabel} modelSpec={modelSpec}
         onSend={sendMessage} onClear={clearWorkspace} onExport={exportWorkspace}
-        onNewChat={startNewChat} fileInputRef={fileInputRef} pendingAttachments={pendingAttachments}
+        onNewChat={startNewChat} fileInputRef={fileInputRef} pendingAttachments={pendingAttachments} uploadQueue={uploadQueue} onRetryUpload={retryUpload}
       />
     </div>
     {notice && <div className="toast" role="status">{notice}<button onClick={() => setNotice("")} aria-label="Dismiss notification"><X size={14} /></button></div>}
