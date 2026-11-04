@@ -9,6 +9,8 @@ function createMaterials() {
     wall: new THREE.MeshStandardMaterial({ color: "#89939a", roughness: 0.88, transparent: true, opacity: 0.82 }),
     foundation: new THREE.MeshStandardMaterial({ color: "#69747c", roughness: 0.92 }),
     roof: new THREE.MeshStandardMaterial({ color: "#8d969c", roughness: 0.82, side: THREE.DoubleSide }),
+    glazing: new THREE.MeshPhysicalMaterial({ color: "#8bb9c8", roughness: 0.16, metalness: 0.12, transmission: 0.28, transparent: true, opacity: 0.52, side: THREE.DoubleSide, depthWrite: false }),
+    frame: new THREE.MeshStandardMaterial({ color: "#aeb8bf", roughness: 0.48, metalness: 0.38 }),
     rebar: new THREE.MeshStandardMaterial({ color: "#c18b58", metalness: 0.62, roughness: 0.38 })
   };
 }
@@ -316,6 +318,39 @@ function createFromSpec(scene, model, MATERIALS) {
       if(!opening)addWallPart(`${w.id}-segment-${i}`,from,to,0,h);
       else {addWallPart(`${w.id}-sill-${i}`,from,to,0,opening.bottom);addWallPart(`${w.id}-lintel-${i}`,from,to,opening.top,h);}
     }
+    openings.forEach((opening,index) => {
+      const width = opening.end - opening.start;
+      const openingHeight = opening.top - opening.bottom;
+      if (width <= 0 || openingHeight <= 0) return;
+      const center = a.clone().addScaledVector(direction, (opening.start + opening.end) / 2);
+      center.y += opening.bottom + openingHeight / 2;
+      const frameWidth = Math.min(0.045 * s, width / 10, openingHeight / 10);
+      const frameDepth = Math.max(0.025 * s, thickness * 0.18);
+      const addFramePart = (id, along, vertical, positionAlong, positionY) => {
+        const mesh = new THREE.Mesh(new THREE.BoxGeometry(along, vertical, frameDepth), MATERIALS.frame);
+        mesh.position.copy(a).addScaledVector(direction, positionAlong);
+        mesh.position.y += positionY;
+        mesh.quaternion.setFromUnitVectors(new THREE.Vector3(1,0,0), direction);
+        addMesh(group,elements,mesh,id,"openings",opening.kind === "door" ? "Door frame" : "Window frame",{ ownerId: w.id, openingId: opening.id, openingKind: opening.kind || "opening" });
+      };
+      const offsetFromStart = (opening.start + opening.end) / 2;
+      const sill = opening.bottom, head = opening.top;
+      addFramePart(`${w.id}-opening-${index}-left`,frameWidth,openingHeight,opening.start,sill+openingHeight/2);
+      addFramePart(`${w.id}-opening-${index}-right`,frameWidth,openingHeight,opening.end-frameWidth,sill+openingHeight/2);
+      addFramePart(`${w.id}-opening-${index}-head`,width,frameWidth,opening.start,head-frameWidth/2);
+      if (sill > 0.08 * s) addFramePart(`${w.id}-opening-${index}-sill`,width,frameWidth,opening.start,sill-frameWidth/2);
+      if (opening.kind === "window") {
+        const glass = new THREE.Mesh(new THREE.BoxGeometry(Math.max(0.01*s,width-2*frameWidth), Math.max(0.01*s,openingHeight-2*frameWidth), Math.max(0.008*s,frameDepth*0.18)), MATERIALS.glazing);
+        glass.position.copy(center);
+        glass.quaternion.setFromUnitVectors(new THREE.Vector3(1,0,0),direction);
+        addMesh(group,elements,glass,`${w.id}-opening-${index}-glass`,"openings","Window glazing",{ ownerId:w.id, openingId:opening.id, openingKind:"window" });
+      } else if (opening.kind === "door") {
+        const door = new THREE.Mesh(new THREE.BoxGeometry(Math.max(0.01*s,width-frameWidth),Math.max(0.01*s,openingHeight-frameWidth),Math.max(0.018*s,frameDepth*0.28)),MATERIALS.concrete);
+        door.position.copy(center);
+        door.quaternion.setFromUnitVectors(new THREE.Vector3(1,0,0),direction);
+        addMesh(group,elements,door,`${w.id}-opening-${index}-door`,"openings","Door leaf",{ ownerId:w.id, openingId:opening.id, openingKind:"door" });
+      }
+    });
     addReinforcement(group,elements,w,s,MATERIALS);
   }
   for (const f of model.structure.foundations || []) {
