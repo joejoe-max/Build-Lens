@@ -46,7 +46,7 @@ export async function askBuildLens({ message, history = [], attachments = [], cu
     if (event === "error") streamError = new Error(readableError(payload.error));
     if (event === "done") {
       completed = true;
-      if (!answer && typeof payload.answer === "string") { answer = payload.answer; onDelta(answer); }
+      if (typeof payload.answer === "string" && payload.answer.trim()) { answer = payload.answer; onDelta(answer); }
       if (!modelEventReceived && !payload.model && payload.actions?.length) onActions({ actions: payload.actions, model: currentModel, findings: payload.findings || [] });
     }
   };
