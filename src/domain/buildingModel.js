@@ -154,7 +154,7 @@ const structuralSchema = {
         required: ["id", "start", "end", "height", "thickness", "provenance"],
         properties: {
           ...memberBase, start: point3, end: point3, height: dimension, thickness: dimension,
-          openings: { type: "array", items: { type: "object", additionalProperties: false, required: ["id", "positionFromStart", "width", "height"], properties: { id: { type: "string", minLength: 1 }, kind: { type: "string", enum: ["window", "door", "opening"] }, positionFromStart: dimension, width: dimension, height: dimension, sillHeight: dimension } } },
+          openings: { type: "array", items: { type: "object", additionalProperties: false, required: ["id", "positionFromStart", "width", "height"], properties: { id: { type: "string", minLength: 1 }, kind: { type: "string", enum: ["window", "door", "opening"] }, positionFromStart: dimension, width: dimension, height: dimension, sillHeight: signedMeasurement } } },
         },
       },
     },
@@ -386,7 +386,7 @@ export function validateBuildingModel(model) {
             const op = `${path}.openings[${j}]`;
             if (!isObject(opening) || typeof opening.id !== "string" || !opening.id.trim()) { errors.push(`${op}.id is required`); continue; }
             for (const key of ["positionFromStart", "width", "height"]) checkDimension(opening[key], `${op}.${key}`, errors);
-            if (opening.sillHeight) checkDimension(opening.sillHeight, `${op}.sillHeight`, errors);
+            if (opening.sillHeight) checkSignedMeasurement(opening.sillHeight, `${op}.sillHeight`, errors);
             if (isFiniteNumber(opening.positionFromStart?.value) && isFiniteNumber(opening.width?.value) && opening.positionFromStart.value + opening.width.value > wallLength + 0.001) errors.push(`${op} extends beyond the wall length`);
             if (isFiniteNumber(opening.height?.value) && isFiniteNumber(item.height?.value) && isFiniteNumber(opening.sillHeight?.value || 0) && opening.height.value + (opening.sillHeight?.value || 0) > item.height.value + 0.001) errors.push(`${op} extends beyond the wall height`);
             for (const other of wallOpenings.slice(0,j)) {
