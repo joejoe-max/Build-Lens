@@ -354,8 +354,24 @@ function executeTool(name, args, state) {
       return { ok: false, error: "The reconstruction still has model-level validation errors after valid members were retained.", validationErrors: validation.errors.slice(0, 40), rejectedMembers: normalized.rejected };
     }
     if (observations.length) {
-      const evidence = executeTool("record_drawing_observations", { observations }, state);
-      if (!evidence.ok) return evidence;
+      const categories = ["grid", "level", "column", "beam", "slab", "wall", "foundation", "reinforcement", "material", "load", "calculation", "general", "conflict", "missing_information"];
+      const provenanceValues = ["specified", "calculated", "inferred", "assumed", "unverified", "missing"];
+      const validObservations = observations.filter(item =>
+        item && typeof item.sourceFile === "string" && item.sourceFile.trim() &&
+        Number.isInteger(item.sourcePage) && item.sourcePage > 0 &&
+        categories.includes(item.category) && typeof item.property === "string" && item.property.trim() &&
+        ["string", "number", "boolean"].includes(typeof item.value) &&
+        typeof item.unit === "string" && provenanceValues.includes(item.provenance) &&
+        typeof item.description === "string" && item.description.trim() &&
+        (item.discipline === undefined || ["architectural", "structural", "general"].includes(item.discipline))
+      );
+      if (validObservations.length) {
+        const evidence = executeTool("record_drawing_observations", { observations: validObservations.slice(0, 250) }, state);
+        if (!evidence.ok) return evidence;
+      }
+      if (validObservations.length < observations.length) {
+        state.toolErrors.push({ tool: "record_drawing_observations", error: (observations.length - validObservations.length) + " incomplete observations were skipped; valid model geometry was retained." });
+      }
     }
     const rendered = executeTool("render_building_model", { model: normalized.model }, state);
     if (!rendered.ok) return rendered;
