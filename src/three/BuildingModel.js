@@ -6,7 +6,8 @@ function createMaterials() {
     concrete: new THREE.MeshStandardMaterial({ color: "#a9b0b5", roughness: 0.82 }),
     slab: new THREE.MeshStandardMaterial({ color: "#737d85", roughness: 0.9, side: THREE.DoubleSide }),
     beam: new THREE.MeshStandardMaterial({ color: "#c5cbd0", roughness: 0.76 }),
-    wall: new THREE.MeshStandardMaterial({ color: "#89939a", roughness: 0.88, transparent: true, opacity: 0.82 }),
+    wall: new THREE.MeshStandardMaterial({ color: "#d2d0c8", roughness: 0.9, side: THREE.DoubleSide }),
+    door: new THREE.MeshStandardMaterial({ color: "#725d49", roughness: 0.82 }),
     foundation: new THREE.MeshStandardMaterial({ color: "#69747c", roughness: 0.92 }),
     roof: new THREE.MeshStandardMaterial({ color: "#8d969c", roughness: 0.82, side: THREE.DoubleSide }),
     glazing: new THREE.MeshPhysicalMaterial({ color: "#8bb9c8", roughness: 0.16, metalness: 0.12, transmission: 0.28, transparent: true, opacity: 0.52, side: THREE.DoubleSide, depthWrite: false }),
@@ -16,6 +17,47 @@ function createMaterials() {
 }
 const UNIT_SCALE = { m: 1, mm: 0.001, cm: 0.01, ft: 0.3048 };
 const vec = (p, s) => new THREE.Vector3(p.x * s, p.y * s, p.z * s);
+
+function orientedMemberQuaternion(axis, upHint = new THREE.Vector3(0, 1, 0)) {
+  const x = axis.clone().normalize();
+  let y = upHint.clone().addScaledVector(x, -upHint.dot(x));
+  if (y.lengthSq() < 1e-8) {
+    const fallback = Math.abs(x.z) < 0.9 ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(0, 1, 0);
+    y = fallback.addScaledVector(x, -fallback.dot(x));
+  }
+  y.normalize();
+  const z = new THREE.Vector3().crossVectors(x, y).normalize();
+  y = new THREE.Vector3().crossVectors(z, x).normalize();
+  return new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(x, y, z));
+}
+
+function createWallPrismGeometry(start, direction, normal, from, to, bottom, top, thickness, baseYAt) {
+  const a = start.clone().addScaledVector(direction, from);
+  const b = start.clone().addScaledVector(direction, to);
+  const half = thickness / 2;
+  const yA = baseYAt(from), yB = baseYAt(to);
+  const vertices = [
+    a.x + normal.x * half, yA + bottom, a.z + normal.z * half,
+    b.x + normal.x * half, yB + bottom, b.z + normal.z * half,
+    b.x + normal.x * half, yB + top, b.z + normal.z * half,
+    a.x + normal.x * half, yA + top, a.z + normal.z * half,
+    a.x - normal.x * half, yA + bottom, a.z - normal.z * half,
+    b.x - normal.x * half, yB + bottom, b.z - normal.z * half,
+    b.x - normal.x * half, yB + top, b.z - normal.z * half,
+    a.x - normal.x * half, yA + top, a.z - normal.z * half
+  ];
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(vertices, 3));
+  geometry.setIndex([
+    0, 1, 2, 0, 2, 3, 5, 4, 7, 5, 7, 6,
+    4, 0, 3, 4, 3, 7, 1, 5, 6, 1, 6, 2,
+    3, 2, 6, 3, 6, 7, 4, 5, 1, 4, 1, 0
+  ]);
+  geometry.computeVertexNormals();
+  geometry.computeBoundingBox();
+  geometry.computeBoundingSphere();
+  return geometry;
+}
 
 function addMesh(group, elements, mesh, id, category, label, metadata = {}) {
   mesh.castShadow = true; mesh.receiveShadow = true;
@@ -262,16 +304,16 @@ function createFromSpec(scene, model, MATERIALS) {
   for (const c of model.structure.columns || []) {
     const a = vec(c.base, s), b = vec(c.top, s), d = b.clone().sub(a), length = d.length();
     if (!length) continue;
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(c.width.value*s, length, c.depth.value*s), MATERIALS.concrete);
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(length, c.width.value * s, c.depth.value * s), MATERIALS.concrete);
     mesh.position.copy(a).add(b).multiplyScalar(.5);
-    mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0), d.normalize());
+    mesh.quaternion.copy(orientedMemberQuaternion(d, new THREE.Vector3(1, 0, 0)));
     addMesh(group,elements,mesh,c.id,"columns",c.label); addReinforcement(group,elements,c,s,MATERIALS); (c.reinforcement || []).forEach((layout,index) => addDerivedLongitudinalBars(group,elements,c,layout,s,"columns",index,MATERIALS)); addDerivedStirrups(group,elements,c,s,"columns",MATERIALS);
   }
   for (const b of model.structure.beams || []) {
     const a=vec(b.start,s), z=vec(b.end,s), d=z.clone().sub(a), length=d.length(); if(!length) continue;
-    const mesh=new THREE.Mesh(new THREE.BoxGeometry(length,b.depth.value*s,b.width.value*s),MATERIALS.beam);
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(length, b.depth.value * s, b.width.value * s), MATERIALS.beam);
     mesh.position.copy(a).add(z).multiplyScalar(.5);
-    mesh.quaternion.setFromUnitVectors(new THREE.Vector3(1,0,0),d.normalize());
+    mesh.quaternion.copy(orientedMemberQuaternion(d, new THREE.Vector3(0, 1, 0)));
     addMesh(group,elements,mesh,b.id,"beams",b.label); addReinforcement(group,elements,b,s,MATERIALS); (b.reinforcement || []).forEach((layout,index) => addDerivedLongitudinalBars(group,elements,b,layout,s,"beams",index,MATERIALS)); addDerivedStirrups(group,elements,b,s,"beams",MATERIALS);
   }
   for (const slab of model.structure.slabs || []) {
@@ -287,71 +329,88 @@ function createFromSpec(scene, model, MATERIALS) {
     const runLength = run.length(), rise = end.y - start.y;
     if (runLength <= 0 || rise <= 0 || !Number.isInteger(stair.steps) || stair.steps < 1) continue;
     const direction = run.normalize();
-    const widthAxis = new THREE.Vector3(-direction.z, 0, direction.x);
+    const up = new THREE.Vector3(0, 1, 0);
+    const widthAxis = new THREE.Vector3().crossVectors(up, direction).normalize();
     const tread = runLength / stair.steps;
+    const riser = rise / stair.steps;
+    const stairRotation = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(widthAxis, up, direction));
     for (let step = 0; step < stair.steps; step++) {
-      const top = rise * (step + 1) / stair.steps;
       const center = start.clone().addScaledVector(direction, (step + 0.5) * tread);
-      center.y += top / 2;
-      const mesh = new THREE.Mesh(new THREE.BoxGeometry(stair.width.value * s, top, tread), MATERIALS.concrete);
+      center.y = start.y + (step + 0.5) * riser;
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(stair.width.value * s, riser, tread), MATERIALS.concrete);
       mesh.position.copy(center);
-      mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), direction);
-      addMesh(group, elements, mesh, `${stair.id}-step-${step + 1}`, "stairs", stair.label || stair.id);
+      mesh.quaternion.copy(stairRotation);
+      addMesh(group, elements, mesh, `${stair.id}-step-${step + 1}`, "stairs", stair.label || stair.id, { stepNumber: step + 1, totalSteps: stair.steps });
     }
     addReinforcement(group, elements, stair, s, MATERIALS);
   }
   for (const w of model.structure.walls || []) {
-    const a=vec(w.start,s), b=vec(w.end,s), d=b.clone().sub(a), length=d.length(); if(!length) continue;
-    const h=w.height.value*s, thickness=w.thickness.value*s, direction=d.clone().normalize();
-    const openings=(w.openings||[]).map(o=>({id:o.id,kind:o.kind||"opening",start:o.positionFromStart.value*s,end:(o.positionFromStart.value+o.width.value)*s,bottom:(o.sillHeight?.value||0)*s,top:((o.sillHeight?.value||0)+o.height.value)*s})).sort((x,y)=>x.start-y.start);
-    const boundaries=[0,length,...openings.flatMap(o=>[o.start,o.end])].filter(v=>v>=0&&v<=length).sort((x,y)=>x-y).filter((v,i,a)=>i===0||Math.abs(v-a[i-1])>1e-6);
-    const addWallPart=(id,from,to,bottom,top)=>{
-      if(to-from<=1e-5||top-bottom<=1e-5)return;
-      const mesh=new THREE.Mesh(new THREE.BoxGeometry(to-from,top-bottom,thickness),MATERIALS.wall);
-      mesh.position.copy(a).addScaledVector(direction,(from+to)/2);mesh.position.y+=bottom+(top-bottom)/2;
-      mesh.quaternion.setFromUnitVectors(new THREE.Vector3(1,0,0),direction);
-      addMesh(group,elements,mesh,id,"walls",w.label);
+    const a = vec(w.start, s), b = vec(w.end, s);
+    const horizontal = new THREE.Vector3(b.x - a.x, 0, b.z - a.z);
+    const length = horizontal.length();
+    if (length <= 1e-8) continue;
+    const direction = horizontal.normalize();
+    const normal = new THREE.Vector3(-direction.z, 0, direction.x);
+    const wallRotation = orientedMemberQuaternion(direction, new THREE.Vector3(0, 1, 0));
+    const h = w.height.value * s, thickness = w.thickness.value * s;
+    const baseYAt = distance => a.y + (b.y - a.y) * (distance / length);
+    const openings = (w.openings || []).map(o => {
+      const start = Math.max(0, o.positionFromStart.value * s);
+      const end = Math.min(length, (o.positionFromStart.value + o.width.value) * s);
+      const bottom = Math.max(0, Math.min(h, (o.sillHeight?.value || 0) * s));
+      const top = Math.max(bottom, Math.min(h, bottom + o.height.value * s));
+      return { id: o.id, kind: o.kind || "opening", start, end, bottom, top };
+    }).filter(o => o.end - o.start > 1e-5 && o.top - o.bottom > 1e-5).sort((x, y) => x.start - y.start);
+    const boundaries = [0, length, ...openings.flatMap(o => [o.start, o.end])]
+      .sort((x, y) => x - y)
+      .filter((value, index, values) => index === 0 || Math.abs(value - values[index - 1]) > 1e-6);
+    const addWallPart = (id, from, to, bottom, top) => {
+      if (to - from <= 1e-5 || top - bottom <= 1e-5) return;
+      const geometry = createWallPrismGeometry(a, direction, normal, from, to, bottom, top, thickness, baseYAt);
+      const mesh = new THREE.Mesh(geometry, MATERIALS.wall);
+      addMesh(group, elements, mesh, id, "walls", w.label, { wallId: w.id });
     };
-    for(let i=0;i<boundaries.length-1;i++){
-      const from=boundaries[i],to=boundaries[i+1],mid=(from+to)/2;
-      const opening=openings.find(o=>mid>o.start&&mid<o.end);
-      if(!opening)addWallPart(`${w.id}-segment-${i}`,from,to,0,h);
-      else {addWallPart(`${w.id}-sill-${i}`,from,to,0,opening.bottom);addWallPart(`${w.id}-lintel-${i}`,from,to,opening.top,h);}
+    for (let i = 0; i < boundaries.length - 1; i++) {
+      const from = boundaries[i], to = boundaries[i + 1], mid = (from + to) / 2;
+      const opening = openings.find(o => mid > o.start && mid < o.end);
+      if (!opening) addWallPart(`${w.id}-segment-${i}`, from, to, 0, h);
+      else {
+        addWallPart(`${w.id}-sill-${i}`, from, to, 0, opening.bottom);
+        addWallPart(`${w.id}-lintel-${i}`, from, to, opening.top, h);
+      }
     }
-    openings.forEach((opening,index) => {
+    openings.forEach((opening, index) => {
       const width = opening.end - opening.start;
       const openingHeight = opening.top - opening.bottom;
       if (width <= 0 || openingHeight <= 0) return;
-      const center = a.clone().addScaledVector(direction, (opening.start + opening.end) / 2);
-      center.y += opening.bottom + openingHeight / 2;
+      const offsetFromStart = (opening.start + opening.end) / 2;
+      const center = a.clone().addScaledVector(direction, offsetFromStart);
+      center.y = baseYAt(offsetFromStart) + opening.bottom + openingHeight / 2;
       const frameWidth = Math.min(0.045 * s, width / 10, openingHeight / 10);
       const frameDepth = Math.max(0.025 * s, thickness * 0.18);
       const addFramePart = (id, along, vertical, positionAlong, positionY) => {
         const mesh = new THREE.Mesh(new THREE.BoxGeometry(along, vertical, frameDepth), MATERIALS.frame);
         mesh.position.copy(a).addScaledVector(direction, positionAlong);
-        mesh.position.y += positionY;
-        mesh.quaternion.setFromUnitVectors(new THREE.Vector3(1,0,0), direction);
-        addMesh(group,elements,mesh,id,"openings",opening.kind === "door" ? "Door frame" : "Window frame",{ ownerId: w.id, openingId: opening.id, openingKind: opening.kind || "opening" });
+        mesh.position.y = baseYAt(positionAlong) + positionY;
+        mesh.quaternion.copy(wallRotation);
+        addMesh(group, elements, mesh, id, "openings", opening.kind === "door" ? "Door frame" : "Window frame", { ownerId: w.id, openingId: opening.id, openingKind: opening.kind });
       };
-      const offsetFromStart = (opening.start + opening.end) / 2;
       const sill = opening.bottom, head = opening.top;
-      addFramePart(`${w.id}-opening-${index}-left`,frameWidth,openingHeight,opening.start+frameWidth/2,sill+openingHeight/2);
-      addFramePart(`${w.id}-opening-${index}-right`,frameWidth,openingHeight,opening.end-frameWidth/2,sill+openingHeight/2);
-      addFramePart(`${w.id}-opening-${index}-head`,width,frameWidth,offsetFromStart,head-frameWidth/2);
-      if (sill > 0.08 * s) addFramePart(`${w.id}-opening-${index}-sill`,width,frameWidth,offsetFromStart,sill-frameWidth/2);
+      addFramePart(`${w.id}-opening-${index}-left`, frameWidth, openingHeight, opening.start + frameWidth / 2, sill + openingHeight / 2);
+      addFramePart(`${w.id}-opening-${index}-right`, frameWidth, openingHeight, opening.end - frameWidth / 2, sill + openingHeight / 2);
+      addFramePart(`${w.id}-opening-${index}-head`, width, frameWidth, offsetFromStart, head - frameWidth / 2);
+      if (sill > 0.08 * s) addFramePart(`${w.id}-opening-${index}-sill`, width, frameWidth, offsetFromStart, sill - frameWidth / 2);
       if (opening.kind === "window") {
-        const glass = new THREE.Mesh(new THREE.BoxGeometry(Math.max(0.01*s,width-2*frameWidth), Math.max(0.01*s,openingHeight-2*frameWidth), Math.max(0.008*s,frameDepth*0.18)), MATERIALS.glazing);
-        glass.position.copy(center);
-        glass.quaternion.setFromUnitVectors(new THREE.Vector3(1,0,0),direction);
-        addMesh(group,elements,glass,`${w.id}-opening-${index}-glass`,"openings","Window glazing",{ ownerId:w.id, openingId:opening.id, openingKind:"window" });
+        const glass = new THREE.Mesh(new THREE.BoxGeometry(Math.max(0.01 * s, width - 2 * frameWidth), Math.max(0.01 * s, openingHeight - 2 * frameWidth), Math.max(0.008 * s, frameDepth * 0.18)), MATERIALS.glazing);
+        glass.position.copy(center); glass.quaternion.copy(wallRotation);
+        addMesh(group, elements, glass, `${w.id}-opening-${index}-glass`, "openings", "Window glazing", { ownerId: w.id, openingId: opening.id, openingKind: "window" });
       } else if (opening.kind === "door") {
-        const door = new THREE.Mesh(new THREE.BoxGeometry(Math.max(0.01*s,width-frameWidth),Math.max(0.01*s,openingHeight-frameWidth),Math.max(0.018*s,frameDepth*0.28)),MATERIALS.concrete);
-        door.position.copy(center);
-        door.quaternion.setFromUnitVectors(new THREE.Vector3(1,0,0),direction);
-        addMesh(group,elements,door,`${w.id}-opening-${index}-door`,"openings","Door leaf",{ ownerId:w.id, openingId:opening.id, openingKind:"door" });
+        const door = new THREE.Mesh(new THREE.BoxGeometry(Math.max(0.01 * s, width - frameWidth), Math.max(0.01 * s, openingHeight - frameWidth), Math.max(0.018 * s, frameDepth * 0.28)), MATERIALS.door);
+        door.position.copy(center); door.quaternion.copy(wallRotation);
+        addMesh(group, elements, door, `${w.id}-opening-${index}-door`, "openings", "Door leaf", { ownerId: w.id, openingId: opening.id, openingKind: "door" });
       }
     });
-    addReinforcement(group,elements,w,s,MATERIALS);
+    addReinforcement(group, elements, w, s, MATERIALS);
   }
   for (const f of model.structure.foundations || []) {
     const mesh=new THREE.Mesh(new THREE.BoxGeometry(f.width.value*s,f.depth.value*s,f.length.value*s),MATERIALS.foundation);
