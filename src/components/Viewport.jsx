@@ -9,6 +9,60 @@ const ACTION_CATEGORY = {
   slabs: "slabs", walls: "walls", stairs: "stairs", roofs: "roofs", reinforcement: "reinforcement",
   grids: "grids", all: "all"
 };
+function pointInWalkPolygon(x, z, outline) {
+  let inside = false;
+  for (let i = 0, j = outline.length - 1; i < outline.length; j = i++) {
+    const a = outline[i], b = outline[j];
+    if (((a.z > z) !== (b.z > z)) && x < (b.x - a.x) * (z - a.z) / ((b.z - a.z) || 1e-12) + a.x) inside = !inside;
+  }
+  return inside;
+}
+function walkPolygonCentroid(outline) {
+  let area = 0, x = 0, z = 0;
+  for (let i = 0; i < outline.length; i++) {
+    const a = outline[i], b = outline[(i + 1) % outline.length], cross = a.x * b.z - b.x * a.z;
+    area += cross; x += (a.x + b.x) * cross; z += (a.z + b.z) * cross;
+  }
+  if (Math.abs(area) < 1e-9) return outline.reduce((p, v) => ({ x: p.x + v.x / outline.length, z: p.z + v.z / outline.length }), { x: 0, z: 0 });
+  return { x: x / (3 * area), z: z / (3 * area) };
+}
+function walkPositionClear(x, z, model, scale, radius = 0.22) {
+  const structure = model?.structure || {}, slabs = structure.slabs || [];
+  if (slabs.some(s => s.outline?.length >= 3) && !slabs.some(s => s.outline?.length >= 3 && pointInWalkPolygon(x / scale, z / scale, s.outline))) return false;
+  for (const wall of structure.walls || []) {
+    const ax = wall.start.x * scale, az = wall.start.z * scale, bx = wall.end.x * scale, bz = wall.end.z * scale;
+    const dx = bx - ax, dz = bz - az, lengthSq = dx * dx + dz * dz;
+    if (lengthSq < 1e-10) continue;
+    const t = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / lengthSq));
+    const px = ax + t * dx, pz = az + t * dz;
+    if (Math.hypot(x - px, z - pz) >= radius + (wall.thickness?.value || 0.15) * scale / 2) continue;
+    const along = Math.sqrt(lengthSq) * t / scale;
+    const door = (wall.openings || []).some(o => o.kind === "door" && along >= o.positionFromStart.value + 0.04 && along <= o.positionFromStart.value + o.width.value - 0.04 && o.height.value >= 1.8);
+    if (!door) return false;
+  }
+  for (const column of structure.columns || []) {
+    const hw = column.width.value * scale / 2 + radius, hd = column.depth.value * scale / 2 + radius;
+    if (x >= Math.min(column.base.x,column.top.x)*scale-hw && x <= Math.max(column.base.x,column.top.x)*scale+hw &&
+        z >= Math.min(column.base.z,column.top.z)*scale-hd && z <= Math.max(column.base.z,column.top.z)*scale+hd) return false;
+  }
+  return true;
+}
+function findWalkStart(model, bounds, scale) {
+  const outline = (model?.structure?.slabs || []).find(s => s.outline?.length >= 3)?.outline;
+  const center = outline ? walkPolygonCentroid(outline) : { x:(bounds.min.x+bounds.max.x)/(2*scale), z:(bounds.min.z+bounds.max.z)/(2*scale) };
+  if (outline) {
+    const xs=outline.map(p=>p.x), zs=outline.map(p=>p.z), minX=Math.min(...xs), maxX=Math.max(...xs), minZ=Math.min(...zs), maxZ=Math.max(...zs);
+    const candidates=[center];
+    for(let ring=1;ring<=24;ring++){const d=ring*0.35;candidates.push(
+      {x:center.x+d,z:center.z},{x:center.x-d,z:center.z},{x:center.x,z:center.z+d},{x:center.x,z:center.z-d},
+      {x:center.x+d,z:center.z+d},{x:center.x-d,z:center.z-d},{x:center.x+d,z:center.z-d},{x:center.x-d,z:center.z+d}
+    );}
+    candidates.sort((a,b)=>Math.hypot(a.x-center.x,a.z-center.z)-Math.hypot(b.x-center.x,b.z-center.z));
+    for(const p of candidates) if(p.x>minX+0.25&&p.x<maxX-0.25&&p.z>minZ+0.25&&p.z<maxZ-0.25&&pointInWalkPolygon(p.x,p.z,outline)&&walkPositionClear(p.x*scale,p.z*scale,model,scale)) return {x:p.x*scale,z:p.z*scale};
+  }
+  return walkPositionClear(center.x*scale,center.z*scale,model,scale)?{x:center.x*scale,z:center.z*scale}:null;
+}
+
 
 function Viewport({ view, showGrid = true, modelSpec = null, modelActions = [], findings = [], focusElementId = null, focusRequest = null, compact = false }) {
   const hostRef = useRef(null);
@@ -293,11 +347,12 @@ function Viewport({ view, showGrid = true, modelSpec = null, modelActions = [], 
       if (!modelGroup) return;
       const bounds = new THREE.Box3().setFromObject(modelGroup);
       if (bounds.isEmpty()) return;
-      const center = bounds.getCenter(new THREE.Vector3());
       const unitScale = ({ m: 1, mm: 0.001, cm: 0.01, ft: 0.3048 })[modelSpecRef.current?.units] || 1;
       const groundLevel = modelSpecRef.current?.levels?.[0]?.elevation?.value;
       const eyeY = Number.isFinite(groundLevel) ? groundLevel * unitScale + 1.6 : bounds.min.y + 1.6;
-      camera.position.set(center.x, Math.min(eyeY, bounds.max.y - 0.2), center.z);
+      const start = findWalkStart(modelSpecRef.current, bounds, unitScale);
+      if (!start) { setInspectionNotice("No clear walkable position could be identified from the model's floor and wall geometry."); return; }
+      camera.position.set(start.x, Math.min(eyeY, bounds.max.y - 0.2), start.z);
       camera.rotation.order = "YXZ"; camera.rotation.set(0, 0, 0);
       controls.target.copy(camera.position).add(new THREE.Vector3(0, 0, -3));
       controls.enabled = false; controls.update();
@@ -322,7 +377,10 @@ function Viewport({ view, showGrid = true, modelSpec = null, modelActions = [], 
       camera.rotation.x = Math.max(-1.25, Math.min(1.25, camera.rotation.x - event.movementY * 0.0022));
     };
     const onWalkPointerDown = event => {
-      if (walking && event.pointerType === "touch") lastWalkPointer = { id: event.pointerId, x: event.clientX, y: event.clientY };
+      if (walking && (event.pointerType === "touch" || event.pointerType === "pen")) {
+        lastWalkPointer = { id: event.pointerId, x: event.clientX, y: event.clientY };
+        try { renderer.domElement.setPointerCapture(event.pointerId); } catch {}
+      }
     };
     const onWalkPointerMove = event => {
       if (!walking || !lastWalkPointer || lastWalkPointer.id !== event.pointerId) return;
@@ -331,7 +389,11 @@ function Viewport({ view, showGrid = true, modelSpec = null, modelActions = [], 
       camera.rotation.x = Math.max(-1.2, Math.min(1.2, camera.rotation.x - dy * 0.004));
       lastWalkPointer = { id: event.pointerId, x: event.clientX, y: event.clientY };
     };
-    const onWalkPointerUp = event => { if (lastWalkPointer?.id === event.pointerId) lastWalkPointer = null; };
+    const onWalkPointerUp = event => {
+      if (lastWalkPointer?.id !== event.pointerId) return;
+      lastWalkPointer = null;
+      try { if (renderer.domElement.hasPointerCapture(event.pointerId)) renderer.domElement.releasePointerCapture(event.pointerId); } catch {}
+    };
     const onPointerLockChange = () => { if (walking && !document.pointerLockElement && !("ontouchstart" in window)) stopWalking(); };
     document.addEventListener("keydown", onWalkKeyDown);
     document.addEventListener("keyup", onWalkKeyUp);
@@ -424,7 +486,16 @@ function Viewport({ view, showGrid = true, modelSpec = null, modelActions = [], 
         if (walkKeys.has("s") || walkKeys.has("arrowdown")) movement.sub(forward);
         if (walkKeys.has("d") || walkKeys.has("arrowright")) movement.add(right);
         if (walkKeys.has("a") || walkKeys.has("arrowleft")) movement.sub(right);
-        if (movement.lengthSq()) camera.position.addScaledVector(movement.normalize(), delta * 2.2);
+        if (movement.lengthSq()) {
+          const step = movement.normalize().multiplyScalar(delta * 2.0), model = modelSpecRef.current;
+          const unitScale = ({ m: 1, mm: 0.001, cm: 0.01, ft: 0.3048 })[model?.units] || 1;
+          const nextX = camera.position.x + step.x, nextZ = camera.position.z + step.z;
+          if (walkPositionClear(nextX,nextZ,model,unitScale)) { camera.position.x=nextX; camera.position.z=nextZ; }
+          else {
+            if (walkPositionClear(nextX,camera.position.z,model,unitScale)) camera.position.x=nextX;
+            if (walkPositionClear(camera.position.x,nextZ,model,unitScale)) camera.position.z=nextZ;
+          }
+        }
       }
       controls.update(); applyVisibility(); updateCutaway(); renderer.render(scene, camera);
     };
@@ -513,7 +584,7 @@ function Viewport({ view, showGrid = true, modelSpec = null, modelActions = [], 
       </div>
       {walkMode && <div className="inspection-row walk-direction-pad" onPointerDown={event=>event.stopPropagation()}>
         <span>Move</span>
-        {["w","a","s","d"].map((key,index)=><button key={key} type="button" className="inspection-button walk-direction-button" aria-label={["Move forward","Move left","Move backward","Move right"][index]} onPointerDown={event=>{event.preventDefault();hostRef.current?.__setBuildLensWalkDirection?.(key,true);}} onPointerUp={()=>hostRef.current?.__setBuildLensWalkDirection?.(key,false)} onPointerLeave={()=>hostRef.current?.__setBuildLensWalkDirection?.(key,false)} onPointerCancel={()=>hostRef.current?.__setBuildLensWalkDirection?.(key,false)}>{["↑","←","↓","→"][index]}</button>)}
+        {["w","a","s","d"].map((key,index)=><button key={key} type="button" className="inspection-button walk-direction-button" aria-label={["Move forward","Move left","Move backward","Move right"][index]} onPointerDown={event=>{event.preventDefault();try{event.currentTarget.setPointerCapture(event.pointerId);}catch{}hostRef.current?.__setBuildLensWalkDirection?.(key,true);}} onPointerUp={event=>{hostRef.current?.__setBuildLensWalkDirection?.(key,false);try{if(event.currentTarget.hasPointerCapture(event.pointerId))event.currentTarget.releasePointerCapture(event.pointerId);}catch{}}} onPointerCancel={()=>hostRef.current?.__setBuildLensWalkDirection?.(key,false)} onLostPointerCapture={()=>hostRef.current?.__setBuildLensWalkDirection?.(key,false)}>{["↑","←","↓","→"][index]}</button>)}
       </div>}
       <div className="inspection-row measurement-status"><span>{inspectionNotice || (measurement?.waitingForSecondPoint ? "First point selected — choose the second point." : measurement?.label ? "Measured distance: " + measurement.label : measureMode ? "Tap two points on the model to measure." : "Measurements use the model declared units.")}</span></div>
       <div className="inspection-row inspection-slider-row"><span>Section position</span><input aria-label="Cutaway section position" type="range" min="0" max="100" value={Math.round(cutaway.position * 100)} onChange={event => setCutaway(current => ({ ...current, position: Number(event.target.value) / 100 }))} disabled={!cutaway.enabled}/></div>
