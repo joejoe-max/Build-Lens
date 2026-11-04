@@ -131,7 +131,8 @@ function addDerivedStirrups(group, elements, item, scale, category, MATERIALS) {
 }
 function addDerivedLongitudinalBars(group, elements, item, layout, scale, category, layoutIndex, MATERIALS) {
   if (layout.arrangement !== "longitudinal" || layout.bars?.length ||
-      !layout.barDiameter?.value || !layout.spacing?.value || !layout.cover?.value ||
+      !layout.barDiameter?.value || !layout.cover?.value ||
+      (!layout.spacing?.value && !layout.quantity) ||
       !item.width?.value || !item.depth?.value) return;
   const start = category === "columns" ? vec(item.base, scale) : vec(item.start, scale);
   const end = category === "columns" ? vec(item.top, scale) : vec(item.end, scale);
@@ -150,20 +151,40 @@ function addDerivedLongitudinalBars(group, elements, item, layout, scale, catego
   }
   const v = new THREE.Vector3().crossVectors(axis, u).normalize();
   const diameter = layout.barDiameter.value * scale;
-  const spacing = layout.spacing.value * scale;
+  const spacing = (layout.spacing?.value || 0) * scale;
   const cover = layout.cover.value * scale + diameter / 2;
   const halfW = item.width.value * scale / 2 - cover;
   const halfD = item.depth.value * scale / 2 - cover;
-  if (halfW <= 0 || halfD <= 0 || memberLength <= cover * 2 || spacing <= 0) return;
+  if (halfW <= 0 || halfD <= 0 || memberLength <= cover * 2 || (!layout.quantity && spacing <= 0)) return;
   const corners = [[-halfW,-halfD],[halfW,-halfD],[halfW,halfD],[-halfW,halfD]];
   const positions = [];
-  for (let side = 0; side < 4 && positions.length < 240; side++) {
-    const a = corners[side], b = corners[(side + 1) % 4];
-    const sideLength = Math.hypot(b[0] - a[0], b[1] - a[1]);
-    const segments = Math.max(1, Math.ceil(sideLength / spacing));
-    for (let n = 0; n < segments && positions.length < 240; n++) {
-      const t = n / segments;
-      positions.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]);
+  if (Number.isInteger(layout.quantity) && layout.quantity > 0) {
+    const perimeter = corners.reduce((sum, point, index) => {
+      const next = corners[(index + 1) % corners.length];
+      return sum + Math.hypot(next[0] - point[0], next[1] - point[1]);
+    }, 0);
+    for (let index = 0; index < Math.min(layout.quantity, 240); index++) {
+      let distance = perimeter * index / layout.quantity;
+      for (let side = 0; side < 4; side++) {
+        const a = corners[side], b = corners[(side + 1) % 4];
+        const sideLength = Math.hypot(b[0] - a[0], b[1] - a[1]);
+        if (distance <= sideLength || side === 3) {
+          const t = sideLength ? Math.min(1, distance / sideLength) : 0;
+          positions.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]);
+          break;
+        }
+        distance -= sideLength;
+      }
+    }
+  } else {
+    for (let side = 0; side < 4 && positions.length < 240; side++) {
+      const a = corners[side], b = corners[(side + 1) % 4];
+      const sideLength = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      const segments = Math.max(1, Math.ceil(sideLength / spacing));
+      for (let n = 0; n < segments && positions.length < 240; n++) {
+        const t = n / segments;
+        positions.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]);
+      }
     }
   }
   positions.forEach(([offsetU, offsetV], index) => {
@@ -251,6 +272,34 @@ function addDerivedSlabReinforcement(group, elements, slab, layout, scale, topEl
           generated++;
         }
       }
+    }
+  }
+}
+
+function addDerivedFoundationReinforcement(group, elements, foundation, layout, scale, layoutIndex, MATERIALS) {
+  if (!["mesh", "top", "bottom", "both_faces"].includes(layout.arrangement) ||
+      layout.bars?.length || !layout.barDiameter?.value || !layout.spacing?.value || !layout.cover?.value) return;
+  const diameter = layout.barDiameter.value * scale, spacing = layout.spacing.value * scale;
+  const cover = layout.cover.value * scale + diameter / 2;
+  const halfX = foundation.width.value * scale / 2 - cover;
+  const halfZ = foundation.length.value * scale / 2 - cover;
+  if (halfX <= 0 || halfZ <= 0 || spacing <= 0) return;
+  const center = vec(foundation.center, scale);
+  const faces = layout.arrangement === "top" ? ["top"] : layout.arrangement === "bottom" ? ["bottom"] : ["top", "bottom"];
+  let generated = 0;
+  for (const face of faces) {
+    const y = center.y + (face === "top" ? 1 : -1) * (foundation.depth.value * scale / 2 - cover);
+    for (let z = -halfZ; z <= halfZ + 1e-6 && generated < 1000; z += spacing) {
+      addCylinderBetween(group, elements, new THREE.Vector3(center.x - halfX, y, center.z + z), new THREE.Vector3(center.x + halfX, y, center.z + z), diameter,
+        foundation.id + "-rebar-" + layoutIndex + "-" + face + "-x-" + generated,
+        { ownerId: foundation.id, ownerName: foundation.label || foundation.id, reinforcementType: layout.arrangement, diameter: layout.barDiameter.value, spacing: layout.spacing.value, cover: layout.cover.value, barMark: layout.barMark || null, provenance: layout.provenance || null, layoutIndex, face }, MATERIALS);
+      generated++;
+    }
+    for (let x = -halfX; x <= halfX + 1e-6 && generated < 1000; x += spacing) {
+      addCylinderBetween(group, elements, new THREE.Vector3(center.x + x, y, center.z - halfZ), new THREE.Vector3(center.x + x, y, center.z + halfZ), diameter,
+        foundation.id + "-rebar-" + layoutIndex + "-" + face + "-z-" + generated,
+        { ownerId: foundation.id, ownerName: foundation.label || foundation.id, reinforcementType: layout.arrangement, diameter: layout.barDiameter.value, spacing: layout.spacing.value, cover: layout.cover.value, barMark: layout.barMark || null, provenance: layout.provenance || null, layoutIndex, face }, MATERIALS);
+      generated++;
     }
   }
 }
@@ -444,7 +493,9 @@ function createFromSpec(scene, model, MATERIALS) {
   for (const f of model.structure.foundations || []) {
     const mesh=new THREE.Mesh(new THREE.BoxGeometry(f.width.value*s,f.depth.value*s,f.length.value*s),MATERIALS.foundation);
     mesh.position.copy(vec(f.center,s));
-    addMesh(group,elements,mesh,f.id,"foundations",f.label); addReinforcement(group,elements,f,s,MATERIALS);
+    addMesh(group,elements,mesh,f.id,"foundations",f.label);
+    addReinforcement(group, elements, f, s, MATERIALS);
+    (f.reinforcement || []).forEach((layout, index) => addDerivedFoundationReinforcement(group, elements, f, layout, s, index, MATERIALS));
   }
   const bounds = new THREE.Box3().setFromObject(group);
   const boundsSize = bounds.isEmpty() ? new THREE.Vector3(10, 5, 10) : bounds.getSize(new THREE.Vector3());
