@@ -346,7 +346,7 @@ function createFromSpec(scene, model, MATERIALS) {
     addMesh(group,elements,mesh,b.id,"beams",b.label); addReinforcement(group,elements,b,s,MATERIALS); (b.reinforcement || []).forEach((layout,index) => addDerivedLongitudinalBars(group,elements,b,layout,s,"beams",index,MATERIALS)); addDerivedStirrups(group,elements,b,s,"beams",MATERIALS);
   }
   for (const slab of model.structure.slabs || []) {
-    const elevation=slab.levelId && levels.has(slab.levelId) ? levels.get(slab.levelId) : (levels.values().next().value ?? 0);
+    const elevation = slab.elevation?.value ?? (slab.levelId && levels.has(slab.levelId) ? levels.get(slab.levelId) : 0);
     addSlab(group,elements,slab,s,elevation,MATERIALS);
     addReinforcement(group,elements,slab,s,MATERIALS);
     (slab.reinforcement || []).forEach((layout, index) => addDerivedSlabReinforcement(group, elements, slab, layout, s, slab.elevation?.value ?? elevation, index, MATERIALS));
