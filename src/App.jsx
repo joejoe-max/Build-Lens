@@ -477,7 +477,7 @@ export default function App() {
     if (!attachmentsHydrated) { setNotice("Project documents are still loading. Please wait a moment and send again."); return; }
     if (projectAttachments.length > 12) { setNotice("BuildLens can analyse up to 12 project documents per request. Remove or split the extra files first."); return; }
     const attachmentSnapshot = projectAttachments.slice(0, 12);
-    const history = messagesRef.current.filter(item => item && ["user", "assistant"].includes(item.role) && typeof item.content === "string" && item.content.trim()).slice(-20);
+    const history = messagesRef.current.filter(item => item && ["user", "assistant"].includes(item.role) && typeof item.content === "string" && item.content.trim()).slice(-8);
     const userText = message || `Please inspect the ${attachmentSnapshot.length} project file(s) and summarize what they contain.`;
     const attachmentNames = attachmentSnapshot.map(file => file.name);
     const userEntry = { role: "user", content: attachmentNames.length ? `${userText}\n\nProject files available: ${attachmentNames.join(", ")}` : userText };
@@ -492,7 +492,7 @@ export default function App() {
       // Document text from every active project file is retained; only a
       // maximum of three compressed visual previews are sent per request.
       const visualSelections = attachmentSnapshot.map(() => []);
-      let remainingVisualPreviews = 10;
+      let remainingVisualPreviews = 5;
       // Give every visual document one chance before distributing extra sheets
       // round-robin, so an early multi-page PDF cannot crowd out later files.
       for (let i = 0; i < attachmentSnapshot.length && remainingVisualPreviews > 0; i++) {
@@ -512,7 +512,7 @@ export default function App() {
         }
       }
       const textFileCount = Math.max(1, attachmentSnapshot.filter(file => typeof file.content === "string").length);
-      const perDocumentTextBudget = Math.floor(480000 / textFileCount);
+      const perDocumentTextBudget = Math.floor(240000 / textFileCount);
       const requestAttachments = attachmentSnapshot.map(({ name, type, kind, content }, index) => {
         const visual = visualSelections[index];
         return {
