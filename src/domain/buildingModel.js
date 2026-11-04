@@ -154,7 +154,7 @@ const structuralSchema = {
         required: ["id", "start", "end", "height", "thickness", "provenance"],
         properties: {
           ...memberBase, start: point3, end: point3, height: dimension, thickness: dimension,
-          openings: { type: "array", items: { type: "object", additionalProperties: false, required: ["id", "positionFromStart", "width", "height"], properties: { id: { type: "string", minLength: 1 }, positionFromStart: dimension, width: dimension, height: dimension, sillHeight: dimension } } },
+          openings: { type: "array", items: { type: "object", additionalProperties: false, required: ["id", "positionFromStart", "width", "height"], properties: { id: { type: "string", minLength: 1 }, kind: { type: "string", enum: ["window", "door", "opening"] }, positionFromStart: dimension, width: dimension, height: dimension, sillHeight: dimension } } },
         },
       },
     },
