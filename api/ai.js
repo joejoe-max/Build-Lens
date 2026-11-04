@@ -903,7 +903,7 @@ export default async function handler(req, res) {
 
     const hasSuccessfulWorkspaceAction = state.actions.some(action =>
       ["model.replace", "model.visibility", "model.opacity", "model.reinforcement.add", "model.element.update"].includes(action.type));
-    if (!currentModel && (!state.model || !state.actions.some(action => action.type === "model.replace")) &&
+    if (wantsReconstruction && !currentModel && (!state.model || !state.actions.some(action => action.type === "model.replace")) &&
         !state.actions.some(action => ["model.visibility", "model.opacity"].includes(action.type))) {
       const errors = state.toolErrors.map(item => item.tool + ": " + item.error).join("; ");
       console.error("BuildLens reconstruction incomplete", JSON.stringify({
