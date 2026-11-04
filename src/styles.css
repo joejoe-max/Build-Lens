@@ -117,3 +117,7 @@
 
 .upload-progress-track span.upload-processing{width:38%!important;animation:uploadSlide 1.35s ease-in-out infinite alternate}
 @keyframes uploadSlide{from{transform:translateX(-35%)}to{transform:translateX(170%)}}
+
+.walk-direction-pad{display:flex;align-items:center;gap:6px}
+.walk-direction-pad>span{font-size:10px;color:#b4bdc3;margin-right:4px}
+.walk-direction-button{min-width:34px;min-height:34px;font-size:15px;touch-action:none;user-select:none}
