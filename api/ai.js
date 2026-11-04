@@ -264,6 +264,35 @@ for (const tool of tools) {
   };
 }
 
+function countModelCategories(model) {
+  const categories = ["columns", "beams", "slabs", "walls", "stairs", "foundations", "roofs"];
+  return Object.fromEntries(categories.map(category => [category, Array.isArray(model?.structure?.[category]) ? model.structure[category].length : 0]));
+}
+function buildReconstructionAudit(rawModel, normalized, rejected, validation) {
+  const submitted = countModelCategories(rawModel), retained = countModelCategories(normalized);
+  const missingArchitectural = ["walls", "slabs", "roofs"].filter(category => retained[category] === 0);
+  const levels = Array.isArray(normalized?.levels) ? normalized.levels : [];
+  const points = [];
+  const visit = value => {
+    if (!value || typeof value !== "object") return;
+    if (["x", "y", "z"].every(key => Number.isFinite(value[key]))) points.push(value);
+    else Object.values(value).forEach(visit);
+  };
+  visit(normalized?.structure);
+  const coordinateRanges = {};
+  for (const axis of ["x", "y", "z"]) {
+    const values = points.map(point => point[axis]);
+    if (values.length) coordinateRanges[axis] = { min: Math.min(...values), max: Math.max(...values) };
+  }
+  return {
+    submitted, retained, levels: levels.length, rejectedCount: rejected.length,
+    rejected: rejected.slice(0, 40), missingArchitectural,
+    wallOpenings: (normalized?.structure?.walls || []).reduce((sum, wall) => sum + (wall.openings?.length || 0), 0),
+    slabOpenings: (normalized?.structure?.slabs || []).reduce((sum, slab) => sum + (slab.openings?.length || 0), 0),
+    units: normalized?.units || null, coordinateRanges, validationErrors: (validation?.errors || []).slice(0, 30)
+  };
+}
+
 function normalizeReconstructionModel(input) {
   const model = JSON.parse(JSON.stringify(input));
   const provenance = { status: "unverified", note: "Value supplied by the model without explicit provenance; verify against source drawings." };
@@ -403,8 +432,16 @@ function executeTool(name, args, state) {
     }
     const normalized = normalizeReconstructionModel(proposedModel);
     const validation = validateBuildingModel(normalized.model);
+    const audit = buildReconstructionAudit(proposedModel, normalized.model, normalized.rejected, validation);
+    state.reconstructionAudit = audit;
+    console.info("BuildLens reconstruction audit", JSON.stringify({
+      rawModelJsonCharacters: args.model.length, submitted: audit.submitted, retained: audit.retained,
+      levels: audit.levels, rejectedCount: audit.rejectedCount, missingArchitectural: audit.missingArchitectural,
+      wallOpenings: audit.wallOpenings, slabOpenings: audit.slabOpenings, units: audit.units,
+      coordinateRanges: audit.coordinateRanges, validationErrors: audit.validationErrors
+    }));
     if (!validation.valid) {
-      return { ok: false, error: "The reconstruction still has model-level validation errors after valid members were retained.", validationErrors: validation.errors.slice(0, 40), rejectedMembers: normalized.rejected };
+      return { ok: false, error: "The reconstruction still has model-level validation errors after valid members were retained.", validationErrors: validation.errors.slice(0, 40), rejectedMembers: normalized.rejected, audit };
     }
     if (observations.length) {
       const categories = ["grid", "level", "column", "beam", "slab", "wall", "foundation", "reinforcement", "material", "load", "calculation", "general", "conflict", "missing_information"];
@@ -430,7 +467,7 @@ function executeTool(name, args, state) {
     if (!rendered.ok) return rendered;
     const geometryCount = Object.entries(normalized.model.structure).reduce((sum, [key, value]) =>
       sum + (["columns", "beams", "slabs", "walls", "stairs", "foundations", "roofs"].includes(key) && Array.isArray(value) ? value.length : 0), 0);
-    return { ok: true, modelId: rendered.modelId, elementCounts: rendered.elementCounts, observationsRecorded: state.findings.length, geometryCount, rejectedMembers: normalized.rejected, partial: normalized.rejected.length > 0 };
+    return { ok: true, modelId: rendered.modelId, elementCounts: rendered.elementCounts, observationsRecorded: state.findings.length, geometryCount, rejectedMembers: normalized.rejected, partial: normalized.rejected.length > 0, audit };
   }
   if (args && typeof args.payload === "string") {
     try { args = JSON.parse(args.payload); }
@@ -742,7 +779,7 @@ export default async function handler(req, res) {
     if (!validation.valid) return res.status(400).json({ error: "The current project model is invalid.", details: validation.errors.slice(0, 20) });
   }
 
-  const state = { model: currentModel, actions: [], findings: [], toolErrors: [], reconstructionDraft: null, reconstructionObservations: [], reconstructionSections: null };
+  const state = { model: currentModel, actions: [], findings: [], toolErrors: [], reconstructionDraft: null, reconstructionObservations: [], reconstructionSections: null, reconstructionAudit: null };
   const modelContext = currentModel
     ? "\n\nCurrent validated project model (preserve its existing verified data unless instructed otherwise):\n" + JSON.stringify(currentModel).slice(0, 50000)
     : "\n\nNo building model has been generated for this project yet.";
@@ -896,7 +933,14 @@ export default async function handler(req, res) {
           .reduce((sum, key) => sum + (counts[key] || 0), 0);
         const detail = Object.entries(counts).filter(([, count]) => count).map(([category, count]) => count + " " + category).join(", ");
         if (validateBuildingModel(state.model).valid) {
-          finalAnswer = "";
+          const audit = state.reconstructionAudit;
+          if (audit) {
+            const submitted = Object.entries(audit.submitted).map(([key, value]) => key + ": " + value).join(", ");
+            const retained = Object.entries(audit.retained).map(([key, value]) => key + ": " + value).join(", ");
+            const missing = audit.missingArchitectural.length ? audit.missingArchitectural.join(", ") : "none";
+            const rejected = audit.rejectedCount ? audit.rejected.slice(0, 8).map(item => item.category + "/" + (item.id || "unknown") + ": " + item.reason).join("; ") : "none";
+            finalAnswer = "Reconstruction diagnostic (pre-render):\n- AI submitted: " + submitted + "\n- Renderer will receive: " + retained + "\n- Levels: " + audit.levels + " · Units: " + audit.units + "\n- Wall openings: " + audit.wallOpenings + " · Slab openings: " + audit.slabOpenings + "\n- Architectural categories with no geometry: " + missing + "\n- Rejected elements: " + rejected + "\n- Coordinate ranges: " + JSON.stringify(audit.coordinateRanges) + "\n\nThis confirms what reached the renderer, not whether the drawing interpretation is geometrically correct.";
+          } else finalAnswer = "The building model passed data validation, but the reconstruction audit was not available.";
           completed = true;
           break;
         }
