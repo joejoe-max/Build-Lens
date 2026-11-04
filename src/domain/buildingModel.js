@@ -507,6 +507,9 @@ export function analyzeStructuralConnectivity(model) {
   const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
   const connections = [];
   const warnings = [];
+  const levelElevations = (model.levels || []).map(level => level?.elevation?.value).filter(isFiniteNumber).sort((a,b)=>a-b);
+  const floorHeights = levelElevations.slice(1).map((elevation,index)=>elevation-levelElevations[index]).filter(height=>height>tolerance);
+  const typicalStoreyHeight = floorHeights.length ? [...floorHeights].sort((a,b)=>a-b)[Math.floor(floorHeights.length/2)] : null;
   const supports = [...columns, ...beams];
   for (const beam of beams) {
     for (const end of ["start", "end"]) {
@@ -536,6 +539,13 @@ export function analyzeStructuralConnectivity(model) {
     }
   }
   for (const column of columns) {
+    const columnHeight = Math.abs(column.top.y - column.base.y);
+    if (typicalStoreyHeight && columnHeight < typicalStoreyHeight * 0.6) {
+      warnings.push({ code: "suspicious_short_column", elementId: column.id,
+        message: "Column " + column.id + " is only " + columnHeight.toFixed(3) + " " + model.units +
+          " high, much shorter than the typical floor-to-floor height of " + typicalStoreyHeight.toFixed(3) +
+          " " + model.units + ". Check its base/top elevations against the sections; it may be an incomplete column stub." });
+    }
     const foundation = foundations.find(item =>
       (item.supportedElementIds || []).includes(column.id) ||
       (Math.abs(item.center.x - column.base.x) <= item.width.value / 2 + tolerance &&
