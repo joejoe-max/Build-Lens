@@ -585,6 +585,7 @@ export default function App() {
         {editingName ? <input autoFocus value={projectName} onChange={e => setProjectName(e.target.value)} onBlur={() => setEditingName(false)} onKeyDown={e => e.key === "Enter" && setEditingName(false)} aria-label="Project name" /> : <button className="project-name" onClick={() => setEditingName(true)} title="Rename project">{projectName}<ChevronDown size={14} /></button>}
         <span className="unsaved-dot" /><span className="saved-label">Local workspace</span>
       </div>
+      {uploadQueue.some(job=>job.status!=="ready") && <button type="button" className="top-upload-status" onClick={()=>{setHasStartedChat(true);setMobilePanel(true);}}><span className="top-upload-dot"/>{uploadQueue.some(job=>job.status==="error") ? "Upload failed · retry" : "Processing " + uploadQueue.filter(job=>job.status!=="ready"&&job.status!=="error").length + " file(s)"}</button>}
       <div className="top-actions">
         <button className="quiet-button export-button" onClick={exportWorkspace}>Export workspace</button>
         <button className="icon-button mobile-chat-trigger" onClick={() => setMobilePanel(value => !value)} aria-label="Toggle engineering assistant"><MessageSquare size={18} /></button>
