@@ -690,7 +690,7 @@ export default async function handler(req, res) {
 
   const body = req.body || {};
   const message = typeof body.message === "string" ? body.message.trim() : "";
-  const history = Array.isArray(body.history) ? body.history.slice(-20) : [];
+  const history = Array.isArray(body.history) ? body.history.slice(-8) : [];
   const attachments = Array.isArray(body.attachments) ? body.attachments.slice(0, 12) : [];
 
   if (!message) return res.status(400).json({ error: "Enter a message first." });
@@ -702,7 +702,7 @@ export default async function handler(req, res) {
   let attachmentText = "";
   const imageParts = [];
   const MAX_IMAGES = 10;
-  const MAX_DOCUMENT_TEXT = 480000;
+  const MAX_DOCUMENT_TEXT = 240000;
   for (const [index, item] of attachments.entries()) {
     if (!item || typeof item.name !== "string" || typeof item.type !== "string") continue;
     if (item.kind === "text" && typeof item.content === "string") {
@@ -749,7 +749,7 @@ export default async function handler(req, res) {
     : chatInstructions + (currentModel ? "\n\nThe project has a validated 3D model available in the workspace. Do not claim to change it unless a model tool action succeeds." : "");
   const messages = [
     { role: "developer", content: developerInstructions },
-    ...history.map(({ role, content }) => ({ role, content: content.slice(0, 12000) })),
+    ...history.map(({ role, content }) => ({ role, content: content.slice(0, 8000) })),
     { role: "user", content: imageParts.length ? [{ type: "text", text: message + attachmentText }, ...imageParts] : message + attachmentText }
   ];
 
