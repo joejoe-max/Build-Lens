@@ -100,3 +100,12 @@
 .chat-model-viewport .inspection-tools-content{display:none;width:min(340px,calc(100vw - 32px));max-height:190px;overflow:auto;padding:7px;background:rgba(20,24,27,.97);border:1px solid #39434a;border-radius:7px;box-shadow:0 5px 18px #0008}
 .chat-model-viewport .viewport-inspection-tools.tools-open .inspection-tools-content{display:flex}
 .chat-model-viewport .viewport-inspection-tools .inspection-row{flex-wrap:wrap}
+
+.upload-progress-row{display:grid;grid-template-columns:minmax(0,1fr) 74px auto;align-items:center;gap:9px;padding:8px 10px;margin:5px 0;border:1px solid #343b40;border-radius:7px;background:#171b1e}
+.upload-progress-copy{min-width:0;display:flex;flex-direction:column;gap:3px}
+.upload-progress-copy strong{font-size:11px;color:#d9dfe3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.upload-progress-copy small{font-size:10px;color:#a3adb4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.upload-progress-track{height:4px;border-radius:9px;background:#30383e;overflow:hidden}
+.upload-progress-track span{display:block;height:100%;border-radius:9px;background:#d5bd91;transition:width .22s ease}
+.upload-progress-track span.upload-failed{background:#d66b65}
+.upload-retry{border:1px solid #5a4a35;border-radius:5px;padding:5px 8px;background:#27231e;color:#e7c99b;font-size:10px;cursor:pointer}
