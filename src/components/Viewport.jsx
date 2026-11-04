@@ -341,7 +341,21 @@ function Viewport({ view, showGrid = true, modelSpec = null, modelActions = [], 
       controls.enabled = true;
       if (document.pointerLockElement === renderer.domElement) document.exitPointerLock?.();
       controls.target.copy(camera.position).add(camera.getWorldDirection(new THREE.Vector3()).multiplyScalar(3));
-      controls.update(); setWalkMode(false);
+      controls.update();
+      frameOpacityRef.current = 1;
+      setFrameOpacity(1);
+      for (const element of modelElements) {
+        if (!element.userData.buildLensOpacityMaterial) continue;
+        const materials = Array.isArray(element.material) ? element.material : [element.material];
+        materials.forEach(material => {
+          material.opacity = material.userData.buildLensBaseOpacity ?? 1;
+          material.transparent = material.userData.buildLensBaseTransparent ?? false;
+          material.depthWrite = material.userData.buildLensBaseDepthWrite ?? true;
+          material.needsUpdate = true;
+        });
+      }
+      hostRef.current?.dispatchEvent(new CustomEvent("buildlens-model-change"));
+      setWalkMode(false);
     };
     const startWalking = () => {
       if (!modelGroup) return;
