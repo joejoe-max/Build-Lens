@@ -75,6 +75,7 @@ test("validates pitched roof geometry and required rise metadata", () => {
     outline: [{ x: 0, z: 0 }, { x: 8, z: 0 }, { x: 8, z: 6 }, { x: 0, z: 6 }],
     eavesElevation: { value: 6, provenance },
     rise: { value: 2, provenance },
+    thickness: { value: 0.15, provenance },
     ridgeAxis: "x",
     provenance
   });
@@ -186,6 +187,8 @@ test("renderer creates roof meshes and derives slab reinforcement from documente
   const scene = new THREE.Scene();
   const result = createBuildingModel(scene, model);
   assert.ok(result.elements.some(element => element.userData.category === "roofs" && element.userData.id === "R-TEST"));
+  assert.ok(result.elements.some(element => element.userData.category === "roofs" && element.userData.id === "R-TEST-underside"), "roof should have a physical soffit");
+  assert.equal(result.elements.filter(element => element.userData.category === "roofs" && element.userData.name === "Roof fascia").length, 4, "roof perimeter should have fascia edges");
   assert.ok(result.elements.filter(element => element.userData.category === "reinforcement").length > 0);
   assert.ok(result.elements.some(element => element.userData.ownerId === "B-TEST" && element.userData.reinforcementType === "longitudinal"));
   assert.ok(result.elements.some(element => element.userData.openingKind === "window" && element.userData.name === "Window glazing"));
