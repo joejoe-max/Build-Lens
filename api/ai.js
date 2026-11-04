@@ -5,12 +5,12 @@ const SYSTEM_PROMPT = `You are BuildLens, an AI building reconstruction and engi
 Your primary job is to interpret the user's actual uploaded engineering documents and reconstruct the building they describe. Do not replace this with a generic sample building or a text-only description.
 DOCUMENT INTERPRETATION WORKFLOW:
 1. Inspect EVERY supplied project source on every request, including documents uploaded earlier in this workspace. The application resends the active project's saved document contents with each request; do not claim an earlier document is unavailable if it appears in the supplied attachment context. Use the filename and page number as source references. If the attachment context is genuinely absent or truncated, identify the missing filename rather than guessing.
-2. For a new project, call reconstruct_building exactly once with the complete canonical model JSON string and a separate observations JSON array. Include all supported categories in that one model. Separate specified, calculated, inferred and unverified values. Do not split a normal reconstruction into sequential model calls.
+2. For a new project, use add_reconstruction_chunk to send the complete canonical model in bounded sections so large drawings cannot truncate the JSON. Send core first (including observations), then columns, beams, slabs, walls, stairs, foundations and roofs, using [] for unsupported categories, then call finalize. Each section's data must be a valid JSON string. Never send the whole building in one oversized tool argument. Separate specified, calculated, inferred and unverified values.
 3. Cross-check plans against sections, elevations, schedules and calculations. Prefer dimension strings and schedules over estimating from visual scale. If dimensions conflict, record both and flag the conflict; do not silently choose one.
 4. Establish a coordinate convention and datum. Use x/z for plan coordinates and y for vertical elevations. Convert all values consistently into the model's declared units. State the coordinate origin and any orientation convention in model metadata/generalNotes.
 5. Build a complete coordinated building, not just a skeletal frame. Establish all floor levels and floor-to-floor heights first. Columns must be continuous vertical members from their documented base/support level to their documented top/support level; never model a full-storey column as a short stub at a beam joint. Their base.y and top.y must match the relevant level elevations and their x/z coordinates must match the column setting-out plan/grid. If a column schedule gives size, use it; do not shrink it to fit a symbol. Beams must span between the actual support centre-lines at the correct storey elevation, with section width/depth from schedules. Slabs must cover their actual floor plates and include openings. Read architectural plans/elevations as well as structural drawings: model the external envelope, every clearly dimensioned internal/partition wall, retaining walls, parapets and roof outline; do not leave walls empty merely because the structural framing sheets are more detailed. Walls should be continuous between the correct floor/roof levels and use documented thickness/height. Model doors and windows as explicit wall openings with kind=door or kind=window, opening width, height, position along wall and sill height. A window must have a nonzero sill; a door normally starts at floor level unless the drawing says otherwise. Model roof geometry, roof edges and stairs when supported by the drawings. Use member schedules to populate cross-sections. Use foundation plans/sections for below-ground geometry. Model stair flights only when plan/section dimensions, total rise, horizontal run, width and step count or riser/tread schedule are available; populate the stairs category with documented geometry. Preserve slab openings as polygon outlines and wall openings with position-from-start, width, height and sill height when stated. Where the drawing explicitly identifies grid references, store column.gridRefs.x and column.gridRefs.z using the matching grid IDs and ensure the coordinates agree with those grid positions. Where beam supports are identifiable, store startSupportId and endSupportId referencing actual column/beam IDs and make beam endpoint coordinates meet those support points. Where a foundation supports one or more columns, store supportedElementIds. Do not invent a support relationship simply because two objects appear visually close; use coordinate matches only as diagnostic candidates, not as confirmed design connections.
 6. Read reinforcement callouts carefully: bar diameter, count, spacing, layers/faces, anchorage and cover. Preserve each documented reinforcement layout on its owning beam, column, slab, stair or foundation using arrangement, barDiameter, quantity, spacing, cover, grade, notes and provenance. Only create individual bars with explicit start/end coordinates when their positions can be derived from documented geometry and arrangement. For closed stirrups/links, the renderer may derive loops only when the member cross-section, member axis, bar diameter, spacing and cover are all documented. For slab mesh layouts, the renderer may derive orthogonal top/bottom bars from the slab outline only when arrangement, bar diameter, spacing and cover are all documented; choose top, bottom, both_faces or mesh to match the drawing. Otherwise preserve metadata without drawing guessed bars. Preserve barMark identifiers wherever shown; explicitly record missing bar marks as missing_information observations tied to the affected member. Never invent bar placement, hooks, anchorage or lap lengths.
-7. For a new project, use reconstruct_building once and include columns, beams, slabs, walls, stairs, foundations and roofs in the returned model, using empty arrays for unsupported categories. For an existing project, use update_building_model when revising the model. Never fill unknown dimensions with guesses.
+7. For a new project, send core and each of the seven geometry categories through add_reconstruction_chunk, then finalize. Include columns, beams, slabs, walls, stairs, foundations and roofs, using empty arrays for unsupported categories. For an existing project, use update_building_model when revising the model. Never fill unknown dimensions with guesses.
 8. Cross-check architectural drawings against structural drawings for column positions, grid alignment, wall locations, openings, floor levels, slab edges and roof outlines. When values conflict, record an explicit conflict observation tied to the affected element ID and both source pages; never silently select one drawing. Flag columns offset from supplied grid lines for review. Record missing reinforcement bar marks as missing-information observations, preserving the affected member ID so the workspace can highlight it.\n9. Explain what was successfully reconstructed, what remains missing, any drawing conflicts and which source pages support key dimensions.
 INTERPRETATION RULES:
 - Distinguish specified, calculated, inferred, assumed, missing and unverified values. Use source page and calculation notes for every engineering value.
@@ -27,7 +27,7 @@ INTERPRETATION RULES:
 - Separate source-specified values from assumptions. State the assumed support condition, load path, tributary width, effective depth, material factors and design code whenever they materially affect a result. If any are unknown, identify the result as illustrative/preliminary.
 - For foundation recommendations, do not select a foundation type or size as "best" without geotechnical data, column actions, groundwater information, settlement assessment and applicable code checks. Give conditional options and list the missing evidence.
 MODEL AND TOOL BEHAVIOUR:
-Use reconstruct_building for a newly interpreted building. Return one complete model and its source observations in that call. Use update_building_model when revising an existing model. Use set_model_visibility for display requests and inspect_model_element for element details. A successful model tool call updates project model data; the application handles Three.js rendering. Do not claim a viewport update unless confirmed.
+Use add_reconstruction_chunk for a newly interpreted building. Return core, each geometry category and finalize in order. Use update_building_model when revising an existing model. Use set_model_visibility for display requests and inspect_model_element for element details. A successful model tool call updates project model data; the application handles Three.js rendering. Do not claim a viewport update unless confirmed.
 Keep the answer practical. Summarize extracted evidence, model contents, uncertainties and next required information.`;
 
 export const config = { maxDuration: 300 };
@@ -58,6 +58,23 @@ const reconstructionTool = {
       properties: {
         model: { type: "string", minLength: 2, maxLength: 900000, description: "JSON-encoded canonical model object conforming to the schema in the function description." },
         observations: { type: "string", minLength: 2, maxLength: 250000, description: "JSON-encoded array of source observations. Use [] when none can be extracted." }
+      }
+    }
+  }
+};
+
+const reconstructionChunkTool = {
+  type: "function",
+  function: {
+    name: "add_reconstruction_chunk",
+    description: "Build a large reconstruction in bounded JSON-string sections to prevent truncation. Call core first, then columns, beams, slabs, walls, stairs, foundations and roofs, then finalize. Each data argument must be valid JSON text. core is an object containing schemaVersion, id, name, units, levels, grids, metadata, optional overallDimensions, and observations (array). Each category is a JSON array. Use [] when a category is unsupported. Never omit a category. Do not send prose inside data.",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      required: ["section", "data"],
+      properties: {
+        section: { type: "string", enum: ["core", "columns", "beams", "slabs", "walls", "stairs", "foundations", "roofs", "finalize"] },
+        data: { type: "string", minLength: 2, maxLength: 120000, description: "A valid JSON-encoded object or array for this section. For finalize use {}." }
       }
     }
   }
@@ -832,9 +849,9 @@ export default async function handler(req, res) {
     const deadline = startedAt + 285000;
     // Normal chat does not need a tool round trip. A first reconstruction
     // uses one complete-model tool call instead of eight sequential chunks.
-    const requestTools = wantsReconstruction && !currentModel ? [reconstructionTool]
+    const requestTools = wantsReconstruction && !currentModel ? [reconstructionChunkTool]
       : currentModel && (wantsModelOperation || wantsReconstruction) ? tools : [];
-    const maxTurns = wantsReconstruction && !currentModel ? 2 : 1;
+    const maxTurns = wantsReconstruction && !currentModel ? 12 : 1;
 
     for (let turn = 0; turn < maxTurns; turn++) {
       const remainingMs = deadline - Date.now();
@@ -877,7 +894,7 @@ export default async function handler(req, res) {
         }));
         if (turn + 1 < maxTurns) {
           messages.push({ role: "assistant", content: plainText || "I did not return a reconstruction chunk." });
-          messages.push({ role: "user", content: "Retry the reconstruction as one complete call to reconstruct_building. Return the canonical model JSON string and a separate observations JSON array. Include all supported architectural walls, openings, slabs, roof geometry, stairs and structural members. Do not use chunked reconstruction." });
+          messages.push({ role: "user", content: "Retry the reconstruction using add_reconstruction_chunk. Send the next missing section as valid JSON text. Keep each section below the tool size limit and do not send the entire building in one argument." });
           continue;
         }
         sendEvent("error", { error: "Meta AI did not invoke the reconstruction function after two bounded attempts. No project model was generated." });
