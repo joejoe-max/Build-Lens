@@ -138,3 +138,14 @@
  .viewport-canvas{touch-action:pan-x pan-y}
  .viewport-canvas canvas{touch-action:none}
 }
+
+/* Mobile inspection panel: dock low and limit its footprint so the model stays visible. */
+@media(max-width:760px){
+ .viewport-inspection-tools{top:auto;bottom:8px;right:8px;left:auto;max-width:calc(100% - 16px)}
+ .viewport-inspection-tools .inspection-tools-content{width:min(340px,calc(100vw - 24px));max-height:34dvh;min-height:0}
+ .viewport-inspection-tools.tools-open .inspection-tools-content{overflow-y:auto}
+ .viewport-inspection-tools .inspection-row{gap:4px}
+ .viewport-inspection-tools .inspection-button,.viewport-inspection-tools select{min-height:29px}
+ .viewport-badge{top:10px}
+ .orientation-cube{top:12px}
+}
