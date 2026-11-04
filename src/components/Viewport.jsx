@@ -59,9 +59,10 @@ function Viewport({ view, showGrid = true, modelSpec = null, modelActions = [], 
     scene.fog = new THREE.Fog("#15181b", 35, 1000);
     const camera = new THREE.PerspectiveCamera(42, 1, 0.05, 3000);
     camera.position.set(11, 10, 13);
+    const isMobileViewport = window.matchMedia("(max-width: 760px)").matches;
     let renderer;
     try {
-      renderer = new THREE.WebGLRenderer({ antialias: !compact, alpha: false, powerPreference: compact ? "low-power" : "high-performance" });
+      renderer = new THREE.WebGLRenderer({ antialias: !compact && !isMobileViewport, alpha: false, powerPreference: "low-power" });
     } catch (error) {
       console.error("BuildLens could not initialize WebGL:", error);
       const fallback = document.createElement("div");
@@ -71,9 +72,9 @@ function Viewport({ view, showGrid = true, modelSpec = null, modelActions = [], 
       host.appendChild(fallback);
       return () => fallback.remove();
     }
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, compact ? 1 : 1.5));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, compact || isMobileViewport ? 1 : 1.5));
     renderer.localClippingEnabled = true;
-    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.enabled = !isMobileViewport;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.domElement.style.cssText = "display:block;width:100%;height:100%;touch-action:none";
@@ -81,7 +82,7 @@ function Viewport({ view, showGrid = true, modelSpec = null, modelActions = [], 
 
     scene.add(new THREE.HemisphereLight(0xc8d5e0, 0x282a2d, 2.1));
     const key = new THREE.DirectionalLight(0xffffff, 2.5);
-    key.position.set(7, 18, 8); key.castShadow = true; scene.add(key);
+    key.position.set(7, 18, 8); key.castShadow = !isMobileViewport; scene.add(key);
     const grid = new THREE.GridHelper(100, 100, "#495159", "#30363b");
     grid.position.y = -0.02; scene.add(grid);
 
@@ -412,6 +413,7 @@ function Viewport({ view, showGrid = true, modelSpec = null, modelActions = [], 
       if (!active || !inViewport || document.hidden) return;
       frame = requestAnimationFrame(render);
       const now = performance.now();
+      if (isMobileViewport && lastFrameTime && now - lastFrameTime < 1000 / 30) return;
       const delta = lastFrameTime ? Math.min((now - lastFrameTime) / 1000, 0.05) : 0;
       lastFrameTime = now;
       if (walking && delta > 0) {
