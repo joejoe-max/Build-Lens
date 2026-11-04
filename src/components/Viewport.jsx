@@ -10,7 +10,7 @@ const ACTION_CATEGORY = {
   grids: "grids", all: "all"
 };
 
-export default function Viewport({ view, showGrid = true, modelSpec = null, modelActions = [], findings = [], focusElementId = null, focusRequest = null, compact = false }) {
+function Viewport({ view, showGrid = true, modelSpec = null, modelActions = [], findings = [], focusElementId = null, focusRequest = null, compact = false }) {
   const hostRef = useRef(null);
   const sceneState = useRef(null);
   const modelSpecRef = useRef(modelSpec);
@@ -60,7 +60,7 @@ export default function Viewport({ view, showGrid = true, modelSpec = null, mode
     camera.position.set(11, 10, 13);
     let renderer;
     try {
-      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+      renderer = new THREE.WebGLRenderer({ antialias: !compact, alpha: false, powerPreference: compact ? "low-power" : "high-performance" });
     } catch (error) {
       console.error("BuildLens could not initialize WebGL:", error);
       const fallback = document.createElement("div");
@@ -70,7 +70,7 @@ export default function Viewport({ view, showGrid = true, modelSpec = null, mode
       host.appendChild(fallback);
       return () => fallback.remove();
     }
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, compact ? 1 : 1.5));
     renderer.localClippingEnabled = true;
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -349,18 +349,29 @@ export default function Viewport({ view, showGrid = true, modelSpec = null, mode
       camera.aspect = width / height; camera.updateProjectionMatrix();
       renderer.setSize(width, height, false); renderer.render(scene, camera);
     };
-    const observer = new ResizeObserver(resize); observer.observe(host); resize();
-    let frame = 0, active = true;
+    const resizeObserver = new ResizeObserver(resize); resizeObserver.observe(host); resize();
+    let frame = 0, active = true, inViewport = true;
     const render = () => {
-      if (!active) return;
+      if (!active || !inViewport || document.hidden) return;
       frame = requestAnimationFrame(render);
       controls.update(); applyVisibility(); updateCutaway(); renderer.render(scene, camera);
     };
+    const intersectionObserver = new IntersectionObserver(entries => {
+      inViewport = Boolean(entries[0]?.isIntersecting);
+      if (inViewport && !document.hidden && !frame) render();
+      else if (!inViewport && frame) { cancelAnimationFrame(frame); frame = 0; }
+    }, { rootMargin: "100px" });
+    intersectionObserver.observe(host);
+    const onDocumentVisibility = () => {
+      if (document.hidden && frame) { cancelAnimationFrame(frame); frame = 0; }
+      else if (!document.hidden && inViewport && !frame) render();
+    };
+    document.addEventListener("visibilitychange", onDocumentVisibility);
     render();
 
     sceneState.current = { rebuild };
     return () => {
-      active = false; cancelAnimationFrame(frame); observer.disconnect();
+      active = false; cancelAnimationFrame(frame); resizeObserver.disconnect(); intersectionObserver.disconnect(); document.removeEventListener("visibilitychange", onDocumentVisibility);
       host.removeEventListener("buildlens-reset", onReset);
       host.removeEventListener("buildlens-model-change", onModelChange);
       host.removeEventListener("buildlens-cutaway-change", onCutawayChange);
@@ -430,3 +441,5 @@ export default function Viewport({ view, showGrid = true, modelSpec = null, mode
     </div>
   </div>;
 }
+
+export default React.memo(Viewport);
