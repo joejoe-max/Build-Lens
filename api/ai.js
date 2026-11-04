@@ -61,6 +61,18 @@ const reconstructionTool = {
   }
 };
 
+const reconstructionChunkTool = {
+  type: "function",
+  function: {
+    name: "add_reconstruction_chunk",
+    description: "Create a new building model in small calls. First section=core with JSON string data containing schemaVersion,id,name,units,levels,grids,metadata and optional observations. Then send each category columns,beams,slabs,walls,stairs,foundations,roofs as JSON string arrays. Split large arrays into multiple calls; each call appends. Finish with section=finalize and data='{}'. Do not send the whole model in one response.",
+    parameters: { type: "object", additionalProperties: false, required: ["section","data"], properties: {
+      section: { type: "string", enum: ["core","columns","beams","slabs","walls","stairs","foundations","roofs","finalize"] },
+      data: { type: "string", minLength: 2, maxLength: 900000 }
+    } }
+  }
+};
+
 const tools = [
   {
     type: "function",
