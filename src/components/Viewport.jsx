@@ -398,6 +398,7 @@ function Viewport({ view, showGrid = true, modelSpec = null, modelActions = [], 
     renderer.domElement.addEventListener("click", onSelect);
     host.__resetBuildLensCamera = resetCamera;
     host.__toggleBuildLensWalk = toggleWalkMode;
+    host.__setBuildLensWalkDirection = (key, pressed) => { if (pressed) walkKeys.add(key); else walkKeys.delete(key); };
     host.__clearBuildLensMeasurements = clearMeasurements;
 
     const resize = () => {
@@ -454,6 +455,7 @@ function Viewport({ view, showGrid = true, modelSpec = null, modelActions = [], 
       renderer.domElement.removeEventListener("click", onSelect);
       delete host.__resetBuildLensCamera;
       delete host.__toggleBuildLensWalk;
+      delete host.__setBuildLensWalkDirection;
       delete host.__clearBuildLensMeasurements;
       sceneState.current = null; controls.dispose(); disposeGroup(modelGroup);
       clearMeasurements(); scene.remove(measurementGroup);
@@ -507,6 +509,10 @@ function Viewport({ view, showGrid = true, modelSpec = null, modelActions = [], 
         <button type="button" className="inspection-button" onClick={() => hostRef.current?.__resetBuildLensCamera?.()}>Fit</button>
         <button type="button" className={walkMode ? "inspection-button active" : "inspection-button"} onClick={() => hostRef.current?.__toggleBuildLensWalk?.()}>{walkMode ? "Exit walk" : "Walk inside"}</button>
       </div>
+      {walkMode && <div className="inspection-row walk-direction-pad" onPointerDown={event=>event.stopPropagation()}>
+        <span>Move</span>
+        {["w","a","s","d"].map((key,index)=><button key={key} type="button" className="inspection-button walk-direction-button" aria-label={["Move forward","Move left","Move backward","Move right"][index]} onPointerDown={event=>{event.preventDefault();hostRef.current?.__setBuildLensWalkDirection?.(key,true);}} onPointerUp={()=>hostRef.current?.__setBuildLensWalkDirection?.(key,false)} onPointerLeave={()=>hostRef.current?.__setBuildLensWalkDirection?.(key,false)} onPointerCancel={()=>hostRef.current?.__setBuildLensWalkDirection?.(key,false)}>{["↑","←","↓","→"][index]}</button>)}
+      </div>}
       <div className="inspection-row measurement-status"><span>{inspectionNotice || (measurement?.waitingForSecondPoint ? "First point selected — choose the second point." : measurement?.label ? "Measured distance: " + measurement.label : measureMode ? "Tap two points on the model to measure." : "Measurements use the model declared units.")}</span></div>
       <div className="inspection-row inspection-slider-row"><span>Section position</span><input aria-label="Cutaway section position" type="range" min="0" max="100" value={Math.round(cutaway.position * 100)} onChange={event => setCutaway(current => ({ ...current, position: Number(event.target.value) / 100 }))} disabled={!cutaway.enabled}/></div>
       <div className="inspection-row inspection-slider-row"><span>Frame opacity</span><input aria-label="Frame opacity" type="range" min="20" max="100" value={Math.round(frameOpacity * 100)} onChange={event => setFrameOpacity(Number(event.target.value) / 100)}/></div>
