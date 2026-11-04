@@ -261,8 +261,7 @@ function addRoof(group, elements, roof, scale, MATERIALS) {
     ? shape.lineTo(point.x * scale, point.z * scale)
     : shape.moveTo(point.x * scale, point.z * scale));
   shape.closePath();
-  const geometry = new THREE.ShapeGeometry(shape, 24);
-  const positions = geometry.attributes.position;
+  const geometry = new THREE.ShapeGeometry(shape, 32);
   const xs = roof.outline.map(point => point.x * scale);
   const zs = roof.outline.map(point => point.z * scale);
   const minX = Math.min(...xs), maxX = Math.max(...xs);
@@ -270,8 +269,7 @@ function addRoof(group, elements, roof, scale, MATERIALS) {
   const centerX = (minX + maxX) / 2, centerZ = (minZ + maxZ) / 2;
   const rise = roof.type === "flat" ? 0 : (roof.rise?.value || 0) * scale;
   const base = roof.eavesElevation.value * scale;
-  for (let i = 0; i < positions.count; i++) {
-    const x = positions.getX(i), z = positions.getY(i);
+  const roofHeightAt = (x, z) => {
     let factor = 0;
     if (roof.type === "gable") {
       const span = roof.ridgeAxis === "x" ? maxZ - minZ : maxX - minX;
@@ -287,13 +285,44 @@ function addRoof(group, elements, roof, scale, MATERIALS) {
         : (maxX > minX ? (x - minX) / (maxX - minX) : 0);
       factor = Math.max(0, Math.min(1, t));
     }
-    positions.setXYZ(i, x, base + rise * factor, z);
+    return base + rise * factor;
+  };
+  const positions = geometry.attributes.position;
+  for (let i = 0; i < positions.count; i++) {
+    const x = positions.getX(i), z = positions.getY(i);
+    positions.setXYZ(i, x, roofHeightAt(x, z), z);
   }
   geometry.computeVertexNormals();
-  const mesh = new THREE.Mesh(geometry, MATERIALS.roof);
-  addMesh(group, elements, mesh, roof.id, "roofs", roof.label || roof.type + " roof", {
+  addMesh(group, elements, new THREE.Mesh(geometry, MATERIALS.roof), roof.id, "roofs", roof.label || roof.type + " roof", {
     roofType: roof.type, ridgeAxis: roof.ridgeAxis || null, rise: roof.rise?.value ?? 0,
     thickness: roof.thickness?.value ?? null, provenance: roof.provenance
+  });
+
+  // A roof is a physical shell, not a zero-thickness coloured plane. Render
+  // the documented thickness where available; otherwise use a clearly
+  // display-only fascia depth without changing the engineering model data.
+  const displayThickness = roof.thickness?.value > 0 ? roof.thickness.value * scale : 0.12 * scale;
+  const underside = geometry.clone();
+  const undersidePositions = underside.attributes.position;
+  for (let i = 0; i < undersidePositions.count; i++) undersidePositions.setY(i, undersidePositions.getY(i) - displayThickness);
+  underside.computeVertexNormals();
+  addMesh(group, elements, new THREE.Mesh(underside, MATERIALS.roof), roof.id + "-underside", "roofs", "Roof soffit", {
+    ownerId: roof.id, displayOnlyThickness: !(roof.thickness?.value > 0)
+  });
+
+  roof.outline.forEach((point, index) => {
+    const next = roof.outline[(index + 1) % roof.outline.length];
+    const ax = point.x * scale, az = point.z * scale;
+    const bx = next.x * scale, bz = next.z * scale;
+    const ay = roofHeightAt(ax, az), by = roofHeightAt(bx, bz);
+    const edge = new THREE.BufferGeometry();
+    edge.setAttribute("position", new THREE.Float32BufferAttribute([
+      ax, ay, az, bx, by, bz,
+      bx, by - displayThickness, bz, ax, ay - displayThickness, az
+    ], 3));
+    edge.setIndex([0, 1, 2, 0, 2, 3]);
+    edge.computeVertexNormals();
+    addMesh(group, elements, new THREE.Mesh(edge, MATERIALS.beam), roof.id + "-fascia-" + index, "roofs", "Roof fascia", { ownerId: roof.id });
   });
 }
 
