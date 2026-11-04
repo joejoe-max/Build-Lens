@@ -409,6 +409,21 @@ function Viewport({ view, showGrid = true, modelSpec = null, modelActions = [], 
       modelGroup = created.building;
       modelElements = created.elements;
       findingHighlights = [];
+      const renderedCounts = Object.fromEntries(
+        ["columns", "beams", "slabs", "walls", "stairs", "foundations", "roofs", "reinforcement"]
+          .map(category => [category, modelElements.filter(element => element.userData.category === category).length])
+      );
+      const renderedBounds = new THREE.Box3().setFromObject(modelGroup);
+      const renderedSize = renderedBounds.isEmpty() ? null : renderedBounds.getSize(new THREE.Vector3()).toArray().map(value => Number(value.toFixed(3)));
+      console.info("BuildLens Three.js render audit", {
+        modelId: modelSpecRef.current?.id || "illustrative-sample",
+        source: modelSpecRef.current ? "AI project model" : "illustrative sample fallback",
+        inputElementCounts: Object.fromEntries(Object.entries(modelSpecRef.current?.structure || {}).map(([category, items]) => [category, Array.isArray(items) ? items.length : 0])),
+        actualMeshCounts: renderedCounts,
+        totalMeshes: modelElements.length,
+        boundingSizeMetres: renderedSize,
+        boundsEmpty: renderedBounds.isEmpty()
+      });
       const highlightIds = new Set([
         ...(created.connectivity?.warnings || []).map(warning => warning.elementId),
         ...(findingsRef.current || []).map(finding => finding.elementId).filter(Boolean)
