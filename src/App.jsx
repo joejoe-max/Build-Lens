@@ -473,7 +473,6 @@ export default function App() {
     const userEntry = { role: "user", content: attachmentNames.length ? `${userText}\n\nProject files available: ${attachmentNames.join(", ")}` : userText };
     messagesRef.current = [...history, userEntry, { role: "assistant", content: "" }];
     setMessages(messagesRef.current);
-    setInput("");
     setPendingAttachments([]);
     setBusy(true);
     setHasStartedChat(true);
