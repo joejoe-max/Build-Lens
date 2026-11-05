@@ -163,8 +163,9 @@
 /* Inspection controls live in a dedicated side rail, never over the 3D model. */
 .viewport-stage{position:absolute;inset:0;display:flex;min-width:0;min-height:0;overflow:hidden}
 .viewport-stage>.viewport-canvas{position:relative;inset:auto;flex:1 1 auto;width:auto;height:100%;min-width:0;min-height:0}
-.viewport-stage>.viewport-inspection-tools{position:relative;inset:auto;top:auto;right:auto;bottom:auto;left:auto;transform:none;z-index:9;flex:0 0 132px;width:132px;max-width:132px;height:100%;min-width:0;display:flex;flex-direction:column;align-items:stretch;gap:8px;padding:8px;background:transparent;border:0;border-radius:0;backdrop-filter:none;overflow:hidden}
-.viewport-stage>.viewport-inspection-tools.tools-open{flex-basis:250px;width:250px;max-width:250px;padding:9px}
+.viewport-stage>.viewport-inspection-tools{position:absolute;inset:8px 8px auto auto;z-index:9;width:auto;max-width:min(250px,calc(100% - 16px));height:auto;min-width:0;display:flex;flex-direction:column;align-items:flex-end;gap:8px;padding:0;background:transparent;border:0;border-radius:0;backdrop-filter:none;overflow:visible;pointer-events:none}
+.viewport-stage>.viewport-inspection-tools>*{pointer-events:auto}
+.viewport-stage>.viewport-inspection-tools.tools-open{width:250px;max-width:min(250px,calc(100% - 16px));height:auto;padding:0}
 .viewport-stage .inspection-toggle{display:block;flex:0 0 auto;min-height:34px;padding:7px 8px;border:0;border-radius:5px;background:transparent;color:#e1e7eb;font:10px var(--mono);white-space:normal;box-shadow:none}
 .viewport-stage .inspection-tools-content{display:none;min-width:0;width:100%;max-height:calc(100% - 42px);overflow-y:auto;overscroll-behavior:contain;padding:0;border:0;background:transparent;box-shadow:none}
 .viewport-stage .viewport-inspection-tools.tools-open .inspection-tools-content{display:flex;flex:1 1 auto}
@@ -172,8 +173,8 @@
 .viewport-stage .inspection-row>*{max-width:100%;min-width:0}
 .viewport-stage .inspection-slider-row input[type=range]{min-width:60px}
 @media(max-width:760px){
- .viewport-stage>.viewport-inspection-tools{flex-basis:132px;width:132px;max-width:132px;padding:6px 4px}
- .viewport-stage>.viewport-inspection-tools.tools-open{flex-basis:min(218px,58vw);width:min(218px,58vw);max-width:min(218px,58vw);padding:7px}
+ .viewport-stage>.viewport-inspection-tools{inset:6px 6px auto auto;width:auto;max-width:calc(100% - 12px);padding:0}
+ .viewport-stage>.viewport-inspection-tools.tools-open{width:min(218px,58vw);max-width:min(218px,58vw);padding:0}
  .viewport-stage .inspection-toggle{min-height:38px;padding:7px 8px;font-size:10px;white-space:normal;overflow-wrap:anywhere}
  .viewport-stage .inspection-tools-content{max-height:calc(100% - 46px)}
  .viewport-stage .inspection-button,.viewport-stage .inspection-row select{min-height:32px;font-size:9px;padding:6px}
