@@ -353,7 +353,6 @@ function Viewport({ view, showGrid = true, modelSpec = null, modelActions = [], 
     const stopWalking = () => {
       walking = false; walkKeys.clear(); lastWalkPointer = null;
       controls.enabled = true;
-      if (document.pointerLockElement === renderer.domElement) document.exitPointerLock?.();
       controls.target.copy(camera.position).add(camera.getWorldDirection(new THREE.Vector3()).multiplyScalar(3));
       controls.update();
       frameOpacityRef.current = 1;
@@ -385,9 +384,7 @@ function Viewport({ view, showGrid = true, modelSpec = null, modelActions = [], 
       controls.target.copy(camera.position).add(new THREE.Vector3(0, 0, -3));
       controls.enabled = false; controls.update();
       walking = true; setWalkMode(true);
-      if (renderer.domElement.requestPointerLock && !("ontouchstart" in window)) {
-        renderer.domElement.requestPointerLock();
-      } else setInspectionNotice("Walk mode: drag the model to look around and use the direction pad to move.");
+      setInspectionNotice("Walk mode: drag the view with your finger or mouse to look around; use the direction buttons to move.");
     };
     const toggleWalkMode = () => walking ? stopWalking() : startWalking();
     const onWalkKeyDown = event => {
@@ -399,13 +396,8 @@ function Viewport({ view, showGrid = true, modelSpec = null, modelActions = [], 
       if (key === "escape") stopWalking();
     };
     const onWalkKeyUp = event => walkKeys.delete(event.key.toLowerCase());
-    const onWalkMouseMove = event => {
-      if (!walking || document.pointerLockElement !== renderer.domElement) return;
-      camera.rotation.y -= event.movementX * 0.0022;
-      camera.rotation.x = Math.max(-1.25, Math.min(1.25, camera.rotation.x - event.movementY * 0.0022));
-    };
     const onWalkPointerDown = event => {
-      if (walking && (event.pointerType === "touch" || event.pointerType === "pen")) {
+      if (walking) {
         lastWalkPointer = { id: event.pointerId, x: event.clientX, y: event.clientY };
         try { renderer.domElement.setPointerCapture(event.pointerId); } catch {}
       }
@@ -422,11 +414,8 @@ function Viewport({ view, showGrid = true, modelSpec = null, modelActions = [], 
       lastWalkPointer = null;
       try { if (renderer.domElement.hasPointerCapture(event.pointerId)) renderer.domElement.releasePointerCapture(event.pointerId); } catch {}
     };
-    const onPointerLockChange = () => { if (walking && !document.pointerLockElement && !("ontouchstart" in window)) stopWalking(); };
     document.addEventListener("keydown", onWalkKeyDown);
     document.addEventListener("keyup", onWalkKeyUp);
-    document.addEventListener("mousemove", onWalkMouseMove);
-    document.addEventListener("pointerlockchange", onPointerLockChange);
     renderer.domElement.addEventListener("pointerdown", onWalkPointerDown);
     renderer.domElement.addEventListener("pointermove", onWalkPointerMove);
     renderer.domElement.addEventListener("pointerup", onWalkPointerUp);
