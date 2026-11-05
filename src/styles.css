@@ -161,22 +161,22 @@
 
 
 /* Inspection controls live in a dedicated side rail, never over the 3D model. */
-.viewport-stage{position:absolute;inset:0;display:flex;min-width:0;min-height:0;overflow:hidden}
-.viewport-stage>.viewport-canvas{position:relative;inset:auto;flex:1 1 auto;width:auto;height:100%;min-width:0;min-height:0}
-.viewport-stage>.viewport-inspection-tools{position:absolute;inset:8px 8px auto auto;z-index:9;width:auto;max-width:min(250px,calc(100% - 16px));height:auto;min-width:0;display:flex;flex-direction:column;align-items:flex-end;gap:8px;padding:0;background:transparent;border:0;border-radius:0;backdrop-filter:none;overflow:visible;pointer-events:none}
-.viewport-stage>.viewport-inspection-tools>*{pointer-events:auto}
-.viewport-stage>.viewport-inspection-tools.tools-open{width:250px;max-width:min(250px,calc(100% - 16px));height:auto;padding:0}
-.viewport-stage .inspection-toggle{display:block;flex:0 0 auto;min-height:34px;padding:7px 8px;border:1px solid #4a555d;border-radius:5px;background:#252d32;color:#e1e7eb;font:10px var(--mono);white-space:normal;box-shadow:0 2px 8px rgba(0,0,0,.22)}
-.viewport-stage .inspection-tools-content{display:none;min-width:0;width:100%;max-height:calc(100% - 42px);overflow-y:auto;overscroll-behavior:contain;padding:0;border:0;background:transparent;box-shadow:none}
-.viewport-stage .viewport-inspection-tools.tools-open .inspection-tools-content{display:flex;flex:1 1 auto}
+/* Inspection controls sit below the 3D canvas and never overlay the model. */
+.viewport-stage{position:absolute;inset:0;display:flex;flex-direction:column;min-width:0;min-height:0;overflow:hidden}
+.viewport-stage>.viewport-canvas{position:relative;inset:auto;flex:1 1 auto;width:100%;height:auto;min-width:0;min-height:0}
+.viewport-stage>.viewport-inspection-tools{position:relative;inset:auto;z-index:9;flex:0 0 44px;width:100%;max-width:none;height:44px;min-width:0;display:flex;flex-direction:column;align-items:flex-end;gap:6px;padding:5px 8px;background:transparent;border:0;border-radius:0;backdrop-filter:none;overflow:visible;pointer-events:auto}
+.viewport-stage>.viewport-inspection-tools.tools-open{flex:0 0 auto;height:auto;max-height:38%;width:100%;max-width:none;padding:5px 8px 8px;overflow:hidden}
+.viewport-stage .inspection-toggle{display:block;flex:0 0 auto;min-height:32px;padding:6px 10px;border:1px solid #4a555d;border-radius:5px;background:#252d32;color:#e1e7eb;font:10px var(--mono);white-space:normal;box-shadow:0 2px 8px rgba(0,0,0,.22)}
+.viewport-stage .inspection-tools-content{display:none;min-width:0;width:100%;max-height:100%;overflow-y:auto;overscroll-behavior:contain;padding:6px 0 0;border:0;border-top:1px solid rgba(120,135,145,.22);background:transparent;box-shadow:none}
+.viewport-stage .viewport-inspection-tools.tools-open .inspection-tools-content{display:flex;flex:1 1 auto;flex-direction:column}
 .viewport-stage .inspection-row{flex-wrap:wrap}
 .viewport-stage .inspection-row>*{max-width:100%;min-width:0}
 .viewport-stage .inspection-slider-row input[type=range]{min-width:60px}
 @media(max-width:760px){
- .viewport-stage>.viewport-inspection-tools{inset:6px 6px auto auto;width:auto;max-width:calc(100% - 12px);padding:0}
- .viewport-stage>.viewport-inspection-tools.tools-open{width:min(218px,58vw);max-width:min(218px,58vw);padding:0}
- .viewport-stage .inspection-toggle{min-height:38px;padding:7px 8px;font-size:10px;white-space:normal;overflow-wrap:anywhere}
- .viewport-stage .inspection-tools-content{max-height:calc(100% - 46px)}
+ .viewport-stage>.viewport-inspection-tools{flex-basis:44px;height:44px;padding:4px 6px}
+ .viewport-stage>.viewport-inspection-tools.tools-open{flex-basis:auto;height:auto;max-height:42%;padding:4px 6px 7px}
+ .viewport-stage .inspection-toggle{min-height:34px;padding:6px 8px;font-size:10px;white-space:normal;overflow-wrap:anywhere}
+ .viewport-stage .inspection-tools-content{max-height:100%}
  .viewport-stage .inspection-button,.viewport-stage .inspection-row select{min-height:32px;font-size:9px;padding:6px}
  .viewport-stage .inspection-slider-row{flex-wrap:wrap}
  .viewport-stage .inspection-slider-row input[type=range]{width:100%;min-width:0}
