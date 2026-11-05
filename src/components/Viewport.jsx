@@ -37,7 +37,7 @@ function walkPositionClear(x, z, model, scale, radius = 0.22) {
     const px = ax + t * dx, pz = az + t * dz;
     if (Math.hypot(x - px, z - pz) >= radius + (wall.thickness?.value || 0.15) * scale / 2) continue;
     const along = Math.sqrt(lengthSq) * t / scale;
-    const door = (wall.openings || []).some(o => o.kind === "door" && along >= o.positionFromStart.value + 0.04 && along <= o.positionFromStart.value + o.width.value - 0.04 && o.height.value >= 1.8);
+    const door = (wall.openings || []).some(o => { const openingStart = o.positionFromStart?.value ?? -1; const openingWidth = o.width?.value ?? 0; const sill = o.sillHeight?.value ?? 0; const clearWidth = openingWidth - radius * 2; const centerAlong = openingStart + openingWidth / 2; return o.kind === "door" && clearWidth > 0.1 && Math.abs(along - centerAlong) <= clearWidth / 2 && (o.height?.value ?? 0) >= 1.7 && sill <= 0.15; });
     if (!door) return false;
   }
   for (const column of structure.columns || []) {
@@ -587,8 +587,9 @@ function Viewport({ view, showGrid = true, modelSpec = null, modelActions = [], 
     setHiddenIds(current => current.includes(selectedElement.id) ? current : [...current, selectedElement.id]);
     setSelectedElement(null);
   };
-  return <div className={"viewport-canvas" + (compact ? " compact-preview" : "")} ref={hostRef} aria-label="Interactive 3D building model">
-    <div className={"viewport-inspection-tools" + (toolsOpen ? " tools-open" : " tools-collapsed")} onPointerDown={event => event.stopPropagation()}>
+  return <div className={"viewport-stage" + (compact ? " compact-preview" : "")}>
+    <div className="viewport-canvas" ref={hostRef} aria-label="Interactive 3D building model"></div>
+    <aside className={"viewport-inspection-tools" + (toolsOpen ? " tools-open" : " tools-collapsed")} onPointerDown={event => event.stopPropagation()}>
       <button type="button" className="inspection-toggle" aria-expanded={toolsOpen} onClick={() => setToolsOpen(value => !value)}>{toolsOpen ? "Hide inspection tools" : "Inspect model"}</button>
       <div className="inspection-tools-content">
       <div className="inspection-row">
@@ -620,7 +621,7 @@ function Viewport({ view, showGrid = true, modelSpec = null, modelActions = [], 
       <div className="inspection-row inspection-slider-row"><span>Frame opacity</span><input aria-label="Frame opacity" type="range" min="20" max="100" value={Math.round(frameOpacity * 100)} onChange={event => setFrameOpacity(Number(event.target.value) / 100)}/></div>
       <div className="inspection-row selection-row"><span>{selectedElement ? (selectedElement.category === "reinforcement" ? "Rebar: " + (selectedElement.ownerName || selectedElement.ownerId || "unassigned") + " · " + (selectedElement.reinforcementType || "bar") + (selectedElement.diameter ? " · Ø" + (selectedElement.diameter * ({ m: 1000, mm: 1, cm: 10, ft: 304.8 }[selectedElement.units] || 1000)).toFixed(0) + " mm" : "") + (selectedElement.spacing ? " · @" + (selectedElement.spacing * ({ m: 1000, mm: 1, cm: 10, ft: 304.8 }[selectedElement.units] || 1000)).toFixed(0) + " mm" : "") + (selectedElement.cover ? " · cover " + (selectedElement.cover * ({ m: 1000, mm: 1, cm: 10, ft: 304.8 }[selectedElement.units] || 1000)).toFixed(0) + " mm" : "") + (selectedElement.quantity ? " · count " + selectedElement.quantity : "") + (selectedElement.stirrupIndex ? " · link " + selectedElement.stirrupIndex : "") + (selectedElement.provenance?.status ? " · " + selectedElement.provenance.status : "") : "Selected: " + selectedElement.name + " · " + selectedElement.category + (selectedElement.dimensions ? " · " + selectedElement.dimensions.join(" × ") + " " + selectedElement.units + " local extents" : "")) : "Tap a structural element to inspect it"}</span><button type="button" className="inspection-button" disabled={!selectedElement} onClick={hideSelected}>Hide selected</button><button type="button" className="inspection-button" disabled={!hiddenIds.length} onClick={() => setHiddenIds([])}>Show hidden ({hiddenIds.length})</button></div>
       </div>
-    </div>
+    </aside>
   </div>;
 }
 
