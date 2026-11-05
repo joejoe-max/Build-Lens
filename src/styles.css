@@ -166,7 +166,7 @@
 .viewport-stage>.viewport-inspection-tools{position:absolute;inset:8px 8px auto auto;z-index:9;width:auto;max-width:min(250px,calc(100% - 16px));height:auto;min-width:0;display:flex;flex-direction:column;align-items:flex-end;gap:8px;padding:0;background:transparent;border:0;border-radius:0;backdrop-filter:none;overflow:visible;pointer-events:none}
 .viewport-stage>.viewport-inspection-tools>*{pointer-events:auto}
 .viewport-stage>.viewport-inspection-tools.tools-open{width:250px;max-width:min(250px,calc(100% - 16px));height:auto;padding:0}
-.viewport-stage .inspection-toggle{display:block;flex:0 0 auto;min-height:34px;padding:7px 8px;border:0;border-radius:5px;background:transparent;color:#e1e7eb;font:10px var(--mono);white-space:normal;box-shadow:none}
+.viewport-stage .inspection-toggle{display:block;flex:0 0 auto;min-height:34px;padding:7px 8px;border:1px solid #4a555d;border-radius:5px;background:#252d32;color:#e1e7eb;font:10px var(--mono);white-space:normal;box-shadow:0 2px 8px rgba(0,0,0,.22)}
 .viewport-stage .inspection-tools-content{display:none;min-width:0;width:100%;max-height:calc(100% - 42px);overflow-y:auto;overscroll-behavior:contain;padding:0;border:0;background:transparent;box-shadow:none}
 .viewport-stage .viewport-inspection-tools.tools-open .inspection-tools-content{display:flex;flex:1 1 auto}
 .viewport-stage .inspection-row{flex-wrap:wrap}
