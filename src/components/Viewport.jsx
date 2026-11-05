@@ -26,6 +26,20 @@ function walkPolygonCentroid(outline) {
   if (Math.abs(area) < 1e-9) return outline.reduce((p, v) => ({ x: p.x + v.x / outline.length, z: p.z + v.z / outline.length }), { x: 0, z: 0 });
   return { x: x / (3 * area), z: z / (3 * area) };
 }
+function walkStairSurfaceY(x, z, model, scale, radius = 0.22) {
+  for (const stair of model?.structure?.stairs || []) {
+    const ax = stair.start.x * scale, az = stair.start.z * scale;
+    const bx = stair.end.x * scale, bz = stair.end.z * scale;
+    const dx = bx - ax, dz = bz - az, lengthSq = dx * dx + dz * dz;
+    if (lengthSq < 1e-8) continue;
+    const length = Math.sqrt(lengthSq), t = ((x - ax) * dx + (z - az) * dz) / lengthSq;
+    const lateral = Math.abs((x - ax) * (-dz / length) + (z - az) * (dx / length));
+    if (t < -radius / length || t > 1 + radius / length || lateral > stair.width.value * scale / 2 - radius * 0.15) continue;
+    const progress = Math.max(0, Math.min(1, t));
+    return (stair.start.y + (stair.end.y - stair.start.y) * progress) * scale;
+  }
+  return null;
+}
 function walkPositionClear(x, z, model, scale, radius = 0.22) {
   const structure = model?.structure || {}, slabs = structure.slabs || [];
   if (slabs.some(s => s.outline?.length >= 3) && !slabs.some(s => s.outline?.length >= 3 && pointInWalkPolygon(x / scale, z / scale, s.outline))) return false;
@@ -519,10 +533,23 @@ function Viewport({ view, showGrid = true, modelSpec = null, modelActions = [], 
           const step = movement.normalize().multiplyScalar(delta * 2.0), model = modelSpecRef.current;
           const unitScale = ({ m: 1, mm: 0.001, cm: 0.01, ft: 0.3048 })[model?.units] || 1;
           const nextX = camera.position.x + step.x, nextZ = camera.position.z + step.z;
-          if (walkPositionClear(nextX,nextZ,model,unitScale)) { camera.position.x=nextX; camera.position.z=nextZ; }
-          else {
-            if (walkPositionClear(nextX,camera.position.z,model,unitScale)) camera.position.x=nextX;
-            if (walkPositionClear(camera.position.x,nextZ,model,unitScale)) camera.position.z=nextZ;
+          const moveTo = (x, z) => {
+            if (!walkPositionClear(x,z,model,unitScale)) return false;
+            const stairY = walkStairSurfaceY(x,z,model,unitScale);
+            if (stairY !== null) {
+              camera.position.set(x, stairY + 1.6, z);
+              return true;
+            }
+            const currentStairY = walkStairSurfaceY(camera.position.x,camera.position.z,model,unitScale);
+            if (currentStairY !== null) {
+              const nearLanding = Math.hypot(x - camera.position.x,z - camera.position.z) <= 0.16;
+              if (nearLanding) camera.position.set(x,camera.position.y,z);
+              else camera.position.set(x,camera.position.y,z);
+            } else camera.position.set(x,camera.position.y,z);
+            return true;
+          };
+          if (!moveTo(nextX,nextZ)) {
+            if (!moveTo(nextX,camera.position.z)) moveTo(camera.position.x,nextZ);
           }
         }
       }
