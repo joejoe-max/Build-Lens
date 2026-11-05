@@ -193,7 +193,7 @@ function addDerivedLongitudinalBars(group, elements, item, layout, scale, catego
     const b = end.clone().addScaledVector(axis, -cover).add(offset);
     addCylinderBetween(group, elements, a, b, diameter, item.id + "-longitudinal-" + layoutIndex + "-" + index, {
       ownerId: item.id, ownerName: item.label || item.id, reinforcementType: "longitudinal",
-      diameter: layout.barDiameter.value, spacing: layout.spacing.value, cover: layout.cover.value,
+      diameter: layout.barDiameter.value, spacing: layout.spacing?.value ?? null, cover: layout.cover.value,
       barMark: layout.barMark || null, provenance: layout.provenance || null, layoutIndex
     }, MATERIALS);
   });
