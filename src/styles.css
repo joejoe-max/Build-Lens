@@ -149,3 +149,12 @@
  .viewport-badge{top:10px}
  .orientation-cube{top:12px}
 }
+
+/* Expanded mobile inspection controls live in a reserved dock, not over the 3D canvas. */
+@media(max-width:760px){
+ .viewport-canvas:has(.viewport-inspection-tools.tools-open){bottom:min(38dvh,330px)}
+ .viewport-inspection-tools{top:auto;bottom:8px;left:7px;right:7px;width:auto;max-width:none;align-items:stretch}
+ .viewport-inspection-tools.tools-open{bottom:calc(-1 * min(38dvh,330px) + 7px);flex-direction:column-reverse}
+ .viewport-inspection-tools.tools-open .inspection-tools-content{display:flex;width:100%;max-height:calc(min(38dvh,330px) - 48px);overflow-y:auto}
+ .viewport-inspection-tools.tools-open .inspection-toggle{align-self:flex-end}
+}
