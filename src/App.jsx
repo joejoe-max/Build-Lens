@@ -601,7 +601,6 @@ export default function App() {
         <span className="prototype-pill">PROTOTYPE</span>
       </div>
     </header>
-    {!hasStartedChat && <button className="welcome-ask-button" onClick={() => { setHasStartedChat(true); setMobilePanel(true); }}><span className="welcome-ask-icon"><MessageSquare size={17} /></span><span><strong>Ask BuildLens</strong><small>Start a conversation or upload your drawings</small></span><ArrowRight size={17} /></button>}
     <div className="workspace">
       <aside className="left-rail">
         <button className="rail-item active" title="Model workspace"><Layers3 size={18} /><span>Model</span></button>
