@@ -397,29 +397,28 @@ function Viewport({ view, showGrid = true, modelSpec = null, modelActions = [], 
     };
     const onWalkKeyUp = event => walkKeys.delete(event.key.toLowerCase());
     const onWalkPointerDown = event => {
-      if (walking) {
-        lastWalkPointer = { id: event.pointerId, x: event.clientX, y: event.clientY };
-        try { renderer.domElement.setPointerCapture(event.pointerId); } catch {}
-      }
+      if (!walking || event.target?.closest?.(".walk-direction-pad")) return;
+      event.preventDefault();
+      lastWalkPointer = { id: event.pointerId, x: event.clientX, y: event.clientY };
     };
     const onWalkPointerMove = event => {
       if (!walking || !lastWalkPointer || lastWalkPointer.id !== event.pointerId) return;
+      event.preventDefault();
       const dx = event.clientX - lastWalkPointer.x, dy = event.clientY - lastWalkPointer.y;
-      camera.rotation.y -= dx * 0.004;
-      camera.rotation.x = Math.max(-1.2, Math.min(1.2, camera.rotation.x - dy * 0.004));
+      camera.rotation.y -= dx * 0.006;
+      camera.rotation.x = Math.max(-1.2, Math.min(1.2, camera.rotation.x - dy * 0.006));
       lastWalkPointer = { id: event.pointerId, x: event.clientX, y: event.clientY };
     };
     const onWalkPointerUp = event => {
       if (lastWalkPointer?.id !== event.pointerId) return;
       lastWalkPointer = null;
-      try { if (renderer.domElement.hasPointerCapture(event.pointerId)) renderer.domElement.releasePointerCapture(event.pointerId); } catch {}
     };
     document.addEventListener("keydown", onWalkKeyDown);
     document.addEventListener("keyup", onWalkKeyUp);
-    renderer.domElement.addEventListener("pointerdown", onWalkPointerDown);
-    renderer.domElement.addEventListener("pointermove", onWalkPointerMove);
-    renderer.domElement.addEventListener("pointerup", onWalkPointerUp);
-    renderer.domElement.addEventListener("pointercancel", onWalkPointerUp);
+    host.addEventListener("pointerdown", onWalkPointerDown, { passive: false });
+    window.addEventListener("pointermove", onWalkPointerMove, { passive: false });
+    window.addEventListener("pointerup", onWalkPointerUp);
+    window.addEventListener("pointercancel", onWalkPointerUp);
     const rebuild = () => {
       if (modelGroup) disposeGroup(modelGroup);
       const created = createBuildingModel(scene, modelSpecRef.current);
@@ -561,10 +560,10 @@ function Viewport({ view, showGrid = true, modelSpec = null, modelActions = [], 
     return () => {
       active = false; cancelAnimationFrame(frame); resizeObserver.disconnect(); intersectionObserver.disconnect(); document.removeEventListener("visibilitychange", onDocumentVisibility);
       document.removeEventListener("keydown", onWalkKeyDown); document.removeEventListener("keyup", onWalkKeyUp);
-      document.removeEventListener("mousemove", onWalkMouseMove); document.removeEventListener("pointerlockchange", onPointerLockChange);
-      renderer.domElement.removeEventListener("pointerdown", onWalkPointerDown); renderer.domElement.removeEventListener("pointermove", onWalkPointerMove);
-      renderer.domElement.removeEventListener("pointerup", onWalkPointerUp); renderer.domElement.removeEventListener("pointercancel", onWalkPointerUp);
-      if (document.pointerLockElement === renderer.domElement) document.exitPointerLock?.();
+      host.removeEventListener("pointerdown", onWalkPointerDown);
+      window.removeEventListener("pointermove", onWalkPointerMove);
+      window.removeEventListener("pointerup", onWalkPointerUp);
+      window.removeEventListener("pointercancel", onWalkPointerUp);
       host.removeEventListener("buildlens-reset", onReset);
       host.removeEventListener("buildlens-model-change", onModelChange);
       host.removeEventListener("buildlens-cutaway-change", onCutawayChange);
